@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Taoyuan Traffic Report Generator v5.0
-- Bilingual: Traditional Chinese / English
-- Professional traffic safety analysis
-- Free GIS basemaps (no API key)
-- Year switching: all years / single year
-- KPI cards and policy insights
+桃園市交通裁罰及傷亡資訊報告生成器 v5.1
+- 預設繁體中文內容，支援英文 UI 切換
+- 專業交通安全分析
+- 免費 GIS 底圖（無需 API Key）
+- 年度切換：全部年度 / 單一年度
 """
 
 import requests
@@ -20,7 +19,6 @@ import os
 import sys
 import traceback
 import random
-import json
 
 os.makedirs("docs", exist_ok=True)
 os.makedirs("docs/charts", exist_ok=True)
@@ -38,75 +36,80 @@ ACCIDENT_DATASET_IDS = [
 ]
 
 TAOYUAN_AREAS = {
-    "Taoyuan": [24.989, 121.313],
-    "Zhongli": [24.965, 121.221],
-    "Pingzhen": [24.947, 121.206],
-    "Bade": [24.930, 121.290],
-    "Yangmei": [24.907, 121.146],
-    "Luzhu": [25.045, 121.290],
-    "Daxi": [24.883, 121.288],
-    "Longtan": [24.864, 121.211],
-    "Guishan": [25.022, 121.400],
-    "Dayuan": [25.066, 121.197],
-    "Guanyin": [25.036, 121.133],
-    "Xinwu": [24.974, 121.106],
-    "Fuxing": [24.817, 121.375],
+    "桃園區": [24.989, 121.313], "中壢區": [24.965, 121.221],
+    "平鎮區": [24.947, 121.206], "八德區": [24.930, 121.290],
+    "楊梅區": [24.907, 121.146], "蘆竹區": [25.045, 121.290],
+    "大溪區": [24.883, 121.288], "龍潭區": [24.864, 121.211],
+    "龜山區": [25.022, 121.400], "大園區": [25.066, 121.197],
+    "觀音區": [25.036, 121.133], "新屋區": [24.974, 121.106],
+    "復興區": [24.817, 121.375],
 }
 
-VIOLATION_LAWS = ["Speeding", "Red Light", "Illegal Parking", "No Seatbelt", "Phone Use", "Wrong Way", "Lane Change", "Pedestrian ROW"] * 2
-VIOLATION_FACTS = ["Excessive Speed", "Running Red Light", "Parking Violation", "Distracted Driving", "Failure to Yield", "Illegal U-Turn"] * 3
-ACCIDENT_TYPES = ["Intersection", "Rear-End", "Side Impact", "Pedestrian", "Bicycle", "Single Vehicle"] * 2
+VIOLATION_LAWS_TC = [
+    "超速行駛", "闖紅燈", "違規停車", "未繫安全帶", "使用手持電話",
+    "逆向行駛", "違規變換車道", "未禮讓行人", "未依標線行駛", "違規迴車",
+    "未保持安全距離", "未依號誌行駛", "違規左轉", "違規右轉", "未依車道行駛",
+    "燈光使用不當", "牌照問題", "酒後駕車", "超重載貨", "未依規定讓車",
+    "行人優先區違規", "公車專用道違規", "機車行駛禁行區", "未戴安全帽",
+    "拼裝車輛上路", "車輛機件不合", "未依規定裝載", "危險駕駛", "逼車",
+    "蛇行", "惡意阻擋", "未依規定轉彎", "未依兩段式左轉", "行駛路肩",
+    "違規超車", "未依順行方向停車", "占用身障車位", "占用消防通道",
+    "紅線停車", "黃線臨停違規", "公車招呼站違停", "交叉路口違停",
+    "人行道違停", "騎樓違停", "併排停車", "逆向停車", "未依規定使用方向燈",
+    "夜間未開燈", "霧燈使用不當", "遠燈使用不當", "煞車燈故障",
+]
 
+VIOLATION_FACTS_TC = [
+    "行駛中超速", "紅燈右轉", "路口違規停車", "行駛中未繫安全帶",
+    "行駛中使用手機", "單行道逆向行駛", "變換車道未打方向燈",
+    "行人穿越道未禮讓", "壓線行駛", "路口違規迴車",
+    "未保持行車安全距離", "紅燈越線", "禁止左轉時段違規左轉",
+    "禁止右轉時段違規右轉", "公車專用道違規行駛",
+    "夜間未開大燈行駛", "遠光燈使用不當", "煞車燈不亮",
+    "車牌汙損不清", "臨時停車逾時", "併排停車",
+    "人行道停車", "騎樓停車", "交叉路口停車",
+    "公車站停車", "消防栓前停車", "身障車位占用",
+    "黃線停車", "紅線停車", "逆向停車",
+    "未緊靠路緣停車", "停車未距路口五公尺", "停車未距消防栓三公尺",
+    "停車未距人行道一公尺", "停車未距彎道十公尺", "停車未距坡道十公尺",
+    "停車未距橋樑十公尺", "停車未距隧道十公尺", "停車未距鐵路十公尺",
+    "停車未距平交道十公尺", "停車未距公車站十公尺", "停車未距學校三十公尺",
+    "停車未距醫院三十公尺", "停車未距市場三十公尺", "停車未距教堂三十公尺",
+    "停車未距殯儀館三十公尺", "停車未距加油站十公尺", "停車未距加氣站十公尺",
+    "停車未距化學工廠三十公尺", "停車未距高壓電設施十公尺",
+]
 
-# ========== Bilingual Text Dictionary ==========
+ACCIDENT_TYPES_TC = [
+    "路口交岔撞", "同向擦撞", "對向撞", "追撞", "倒車撞",
+    "側撞", "衝出路外", "行人事故", "自行車事故", "其他",
+    "路口側撞", "路口追撞", "路口擦撞", "快車道事故", "慢車道事故",
+    "機慢車事故", "汽機車事故", "大客車事故", "大貨車事故", "聯結車事故",
+    "計程車事故", "公車事故", "校車事故", "救護車事故", "消防車事故",
+    "警車事故", "工程車事故", "垃圾車事故", "灑水車事故", "吊車事故",
+    "拖吊車事故", "砂石車事故", "油罐車事故", "化學車事故", "冷凍車事故",
+    "貨櫃車事故", "遊覽車事故", "客運事故", "酒駕事故", "毒駕事故",
+    "疲勞駕駛事故", "分心駕駛事故", "超速事故", "闖紅燈事故", "違規左轉事故",
+    "違規右轉事故", "違規迴車事故", "違規變換車道事故", "違規超車事故", "違規停車事故",
+]
 
-I18N = {
-    "title": {"zh": "桃園市交通裁罰及傷亡資訊報告", "en": "Taoyuan Traffic Violation & Accident Report"},
-    "subtitle": {"zh": "資料來源：桃園資料開放平台 | 透過 GitHub Actions 自動更新", "en": "Data Source: Taoyuan Open Data Platform | Auto-updated via GitHub Actions"},
-    "nav_violations": {"zh": "交通違規裁罰", "en": "Traffic Violations"},
-    "nav_accidents": {"zh": "交通事故分析", "en": "Accident Analysis"},
-    "lang_switch": {"zh": "English", "en": "繁體中文"},
-    "update_time": {"zh": "報告生成時間", "en": "Report Generated"},
-    "sample_notice": {"zh": "注意：目前顯示範例資料。API 可能因網路或資料集異動失敗，請查看 GitHub Actions 日誌。", "en": "Note: Currently displaying sample data. API connection may have failed. Check GitHub Actions logs."},
-    "all_years": {"zh": "全部年度", "en": "All Years"},
-    "year_label": {"zh": "年", "en": ""},
-    "violation_section": {"zh": "交通違規裁罰分析", "en": "Traffic Violation Analysis"},
-    "accident_section": {"zh": "交通事故分析", "en": "Traffic Accident Analysis"},
-    "violation_map_title": {"zh": "違規裁罰點位分布地圖", "en": "Violation Location Map"},
-    "accident_map_title": {"zh": "交通事故熱點分布地圖", "en": "Accident Hotspot Map"},
-    "map_hint": {"zh": "免費底圖：OpenStreetMap、CartoDB Positron/Dark、Esri 衛星影像。使用右上角圖層控制切換。綜合地圖可透過左側圖層選單切換年度。", "en": "Free basemaps: OpenStreetMap, CartoDB Positron/Dark, Esri Satellite. Use the top-right layer control to switch. Combined map supports year switching via the left layer menu."},
-    "kpi_total_cases": {"zh": "總案件數", "en": "Total Cases"},
-    "kpi_total_deaths": {"zh": "死亡人數", "en": "Deaths"},
-    "kpi_total_injuries": {"zh": "受傷人數", "en": "Injuries"},
-    "kpi_top_district": {"zh": "最高風險行政區", "en": "Highest Risk District"},
-    "kpi_top_violation": {"zh": "主要違規類型", "en": "Top Violation Type"},
-    "kpi_top_accident": {"zh": "主要事故類型", "en": "Top Accident Type"},
-    "kpi_yoy_change": {"zh": "年度變化", "en": "YoY Change"},
-    "kpi_avg_cases": {"zh": "年均案件數", "en": "Avg Cases/Year"},
-    "insights_title": {"zh": "專業分析摘要", "en": "Professional Analysis"},
-    "recommendations_title": {"zh": "決策建議", "en": "Policy Recommendations"},
-    "footer_source": {"zh": "資料來源", "en": "Data Source"},
-    "footer_note": {"zh": "本報告由 GitHub Actions 自動生成，僅供參考", "en": "Auto-generated by GitHub Actions. For reference only."},
-    "no_data": {"zh": "暫無資料", "en": "No data available"},
-    "cases": {"zh": "件", "en": " cases"},
-    "deaths_unit": {"zh": "人", "en": ""},
-    "injuries_unit": {"zh": "人", "en": ""},
-    "increase": {"zh": "上升", "en": "increase"},
-    "decrease": {"zh": "下降", "en": "decrease"},
-    "stable": {"zh": "持平", "en": "stable"},
-    "risk_high": {"zh": "高風險", "en": "High Risk"},
-    "risk_medium": {"zh": "中風險", "en": "Medium Risk"},
-    "risk_low": {"zh": "低風險", "en": "Low Risk"},
-}
+VEHICLE_TYPES_TC = [
+    "小客車", "機車", "腳踏車", "大貨車", "行人",
+    "大客車", "聯結車", "計程車", "公車", "校車",
+    "救護車", "消防車", "警車", "工程車", "垃圾車",
+    "灑水車", "吊車", "拖吊車", "砂石車", "油罐車",
+    "化學車", "冷凍車", "貨車", "遊覽車", "客運",
+    "火車", "捷運", "輕軌", "高鐵", "電動車",
+]
 
+ROADS_TC = [
+    "中山路", "中正路", "復興路", "文化路", "明德路",
+    "信義路", "和平路", "博愛路", "成功路", "建國路",
+    "中華路", "民族路", "民權路", "民生路", "忠孝路",
+    "仁愛路", "大同路", "光復路", "自強路", "新生路",
+]
 
-def t(key, lang="zh"):
-    """Get translated text"""
-    entry = I18N.get(key, {})
-    return entry.get(lang, entry.get("zh", key))
+AGE_GROUPS_TC = ["18-24歲", "25-39歲", "40-64歲", "65歲以上"]
 
-
-# ========== API Utilities ==========
 
 def api_get(url, params=None, timeout=API_TIMEOUT):
     for attempt in range(1, API_RETRY + 1):
@@ -115,7 +118,7 @@ def api_get(url, params=None, timeout=API_TIMEOUT):
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
-            print(f"      API error (attempt {attempt}/{API_RETRY}): {e}")
+            print(f"      API 錯誤 (嘗試 {attempt}/{API_RETRY}): {e}")
             if attempt == API_RETRY:
                 return None
     return None
@@ -124,7 +127,7 @@ def api_get(url, params=None, timeout=API_TIMEOUT):
 def fetch_datastore_direct(resource_id, limit=100000):
     url = f"{API_BASE}/datastore/{resource_id}"
     params = {"format": "json", "limit": limit}
-    print(f"    Fetching: {url}")
+    print(f"    介接: {url}")
     data = api_get(url, params=params, timeout=API_TIMEOUT)
     if not data:
         return []
@@ -136,7 +139,7 @@ def fetch_datastore_direct(resource_id, limit=100000):
 def fetch_dataset(dataset_id, name=""):
     print(f"\n[{name}] Dataset ID: {dataset_id}")
     meta_url = f"{API_BASE}/dataset/{dataset_id}"
-    print(f"  Fetching metadata: {meta_url}")
+    print(f"  取得詮釋資料: {meta_url}")
     meta = api_get(meta_url, timeout=30)
 
     all_records = []
@@ -150,75 +153,27 @@ def fetch_dataset(dataset_id, name=""):
                 rid = r.get("id") or r.get("resource_id") or r.get("_id")
                 if rid:
                     resource_ids.append((rid, r.get("name", "")))
-        print(f"  Found {len(resource_ids)} resources")
+        print(f"  找到 {len(resource_ids)} 個 resource")
     else:
-        print(f"  [Warning] Cannot get metadata, trying direct access")
+        print(f"  [警告] 無法取得詮釋資料，嘗試直接存取")
         resource_ids = [(dataset_id, "direct")]
 
     for rid, rname in resource_ids:
-        print(f"    Fetching resource: {rname or rid}")
+        print(f"    介接 resource: {rname or rid}")
         records = fetch_datastore_direct(rid, limit=100000)
         if records:
-            print(f"    Success: {len(records)} records")
+            print(f"    成功: {len(records)} 筆")
             for rec in records:
                 rec["_source"] = rname
             all_records.extend(records)
         else:
-            print(f"    Failed or no data")
+            print(f"    失敗或無資料")
 
     df = pd.DataFrame(all_records)
-    print(f"  Total: {df.shape[0]} rows x {df.shape[1]} cols")
+    print(f"  合計: {df.shape[0]} 列 x {df.shape[1]} 欄")
     if not df.empty:
-        print(f"  Columns: {list(df.columns)}")
+        print(f"  欄位: {list(df.columns)}")
     return df
-
-
-# ========== Sample Data ==========
-
-def sample_violations(n=5000):
-    print(f"\n[Fallback] Generating sample violation data: {n} records")
-    areas = list(TAOYUAN_AREAS.keys())
-    years = list(range(109, 115))
-    data = []
-    for _ in range(n):
-        area = random.choice(areas)
-        lat, lon = TAOYUAN_AREAS[area]
-        data.append({
-            "year": random.choice(years),
-            "month": random.randint(1, 12),
-            "time": f"{random.randint(0,23):02d}:{random.randint(0,59):02d}",
-            "law": random.choice(VIOLATION_LAWS),
-            "fact": random.choice(VIOLATION_FACTS),
-            "CountyCode": "68",
-            "AreaName": area,
-            "AreaCode": "",
-            "Road": random.choice(["Zhongshan Rd", "Zhongzheng Rd", "Fuxing Rd", "Wenhua Rd"]),
-            "latitude": round(lat + random.uniform(-0.05, 0.05), 6),
-            "longitude": round(lon + random.uniform(-0.05, 0.05), 6),
-        })
-    return pd.DataFrame(data)
-
-
-def sample_accidents(n=3000):
-    print(f"\n[Fallback] Generating sample accident data: {n} records")
-    areas = list(TAOYUAN_AREAS.keys())
-    years = list(range(108, 115))
-    data = []
-    for _ in range(n):
-        area = random.choice(areas)
-        count = random.randint(1, 50)
-        data.append({
-            "year": random.choice(years),
-            "accident_type": random.choice(ACCIDENT_TYPES),
-            "city": "Taoyuan",
-            "district": area,
-            "age_group": random.choice(["18-24","25-39","40-64","65+"]),
-            "vehicle_type": random.choice(["Car","Scooter","Bicycle","Truck","Pedestrian"]),
-            "case_count": count,
-            "deaths": random.randint(0, min(3, count//10)),
-            "injuries": random.randint(0, count*3),
-        })
-    return pd.DataFrame(data)
 
 
 def find_col(df, candidates):
@@ -227,8 +182,6 @@ def find_col(df, candidates):
             return c
     return None
 
-
-# ========== Free Basemaps ==========
 
 def add_free_basemaps(m):
     folium.TileLayer(
@@ -252,20 +205,62 @@ def add_free_basemaps(m):
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Tiles &copy; Esri",
-        name="Esri Satellite",
+        name="Esri 衛星影像",
         overlay=False, control=True,
     ).add_to(m)
     return m
 
 
-# ========== Professional Analysis ==========
+def sample_violations(n=5000):
+    print(f"\n[Fallback] 產生範例違規資料 {n} 筆")
+    areas = list(TAOYUAN_AREAS.keys())
+    years = list(range(109, 115))
+    data = []
+    for _ in range(n):
+        area = random.choice(areas)
+        lat, lon = TAOYUAN_AREAS[area]
+        data.append({
+            "year": random.choice(years),
+            "month": random.randint(1, 12),
+            "time": f"{random.randint(0,23):02d}:{random.randint(0,59):02d}",
+            "law": random.choice(VIOLATION_LAWS_TC),
+            "fact": random.choice(VIOLATION_FACTS_TC),
+            "CountyCode": "68",
+            "AreaName": area,
+            "AreaCode": "",
+            "Road": random.choice(ROADS_TC),
+            "latitude": round(lat + random.uniform(-0.05, 0.05), 6),
+            "longitude": round(lon + random.uniform(-0.05, 0.05), 6),
+        })
+    return pd.DataFrame(data)
+
+
+def sample_accidents(n=3000):
+    print(f"\n[Fallback] 產生範例事故資料 {n} 筆")
+    areas = list(TAOYUAN_AREAS.keys())
+    years = list(range(108, 115))
+    data = []
+    for _ in range(n):
+        area = random.choice(areas)
+        count = random.randint(1, 50)
+        data.append({
+            "year": random.choice(years),
+            "accident_type": random.choice(ACCIDENT_TYPES_TC),
+            "city": "桃園市",
+            "district": area,
+            "age_group": random.choice(AGE_GROUPS_TC),
+            "vehicle_type": random.choice(VEHICLE_TYPES_TC),
+            "case_count": count,
+            "deaths": random.randint(0, min(3, count//10)),
+            "injuries": random.randint(0, count*3),
+        })
+    return pd.DataFrame(data)
+
 
 def compute_yoy_change(series):
-    """Compute year-over-year change rate from a sorted series"""
     if series is None or len(series) < 2:
         return None, None
     values = series.values
-    years = series.index
     latest = values[-1]
     prev = values[-2]
     if prev == 0:
@@ -274,234 +269,154 @@ def compute_yoy_change(series):
     return change, latest
 
 
-def generate_violation_insights(a):
-    """Generate professional insights for violation data"""
-    insights = {"zh": [], "en": []}
-    df = a["df"]
-    yc = a["yc"]
-    ac = a["ac"]
-    lc = a["lc"]
-    year_counts = a["year_counts"]
-
+def generate_violation_insights(df, yc, ac, lc, year_counts):
+    insights = []
     if year_counts is not None and len(year_counts) > 0:
         total = year_counts.sum()
         avg = year_counts.mean()
         change, latest = compute_yoy_change(year_counts)
-        insights["zh"].append(f"統計期間共計 {total:,} 件違規裁罰案件，年均約 {avg:.0f} 件。")
-        insights["en"].append(f"A total of {total:,} violation cases during the reporting period, averaging {avg:.0f} cases per year.")
+        insights.append(f"統計期間共計 {total:,} 件違規裁罰案件，年均約 {avg:.0f} 件。")
         if change is not None:
-            direction_zh = "上升" if change > 0 else "下降"
-            direction_en = "increased" if change > 0 else "decreased"
-            insights["zh"].append(f"最新年度較前一年度 {direction_zh} {abs(change):.1f}%，顯示違規趨勢{'惡化' if change > 0 else '改善'}。")
-            insights["en"].append(f"The latest year {direction_en} by {abs(change):.1f}% compared to the previous year, indicating a {'worsening' if change > 0 else 'improving'} trend.")
-
+            direction = "上升" if change > 0 else "下降"
+            insights.append(f"最新年度較前一年度 {direction} {abs(change):.1f}%，顯示違規趨勢{'惡化' if change > 0 else '改善'}。")
     if ac and ac in df.columns:
         area_counts = df[ac].value_counts()
         if len(area_counts) > 0:
             top_district = area_counts.index[0]
             top_count = area_counts.iloc[0]
             pct = top_count / area_counts.sum() * 100
-            insights["zh"].append(f"{top_district} 為違規裁罰最高發行政區，佔總數 {pct:.1f}%（{top_count:,} 件），建議優先部署執法資源。")
-            insights["en"].append(f"{top_district} is the highest-risk district, accounting for {pct:.1f}% ({top_count:,} cases) of all violations. Priority enforcement is recommended.")
-
+            insights.append(f"{top_district} 為違規裁罰最高發行政區，佔總數 {pct:.1f}%（{top_count:,} 件），建議優先部署執法資源。")
     if lc and lc in df.columns:
         law_counts = df[lc].value_counts()
         if len(law_counts) > 0:
             top_law = law_counts.index[0]
             top_count = law_counts.iloc[0]
             pct = top_count / law_counts.sum() * 100
-            insights["zh"].append(f"{top_law} 為最常見違規類型，佔總數 {pct:.1f}%（{top_count:,} 件），應加強相關法規宣導。")
-            insights["en"].append(f"{top_law} is the most common violation type, accounting for {pct:.1f}% ({top_count:,} cases). Enhanced public education is recommended.")
-
+            insights.append(f"{top_law} 為最常見違規類型，佔總數 {pct:.1f}%（{top_count:,} 件），應加強相關法規宣導。")
     return insights
 
 
-def generate_accident_insights(a):
-    """Generate professional insights for accident data"""
-    insights = {"zh": [], "en": []}
-    df = a["df"]
-    yc = a["yc"]
-    ac = a["ac"]
-    tc = a["tc"]
-    cc = a["cc"]
-    dc = a["dc"]
-    ic = a["ic"]
-    year_stats = a["year_stats"]
-
+def generate_accident_insights(df, yc, ac, tc, cc, dc, ic, year_stats):
+    insights = []
+    total = year_stats.sum() if year_stats is not None else 0
     if year_stats is not None and len(year_stats) > 0:
-        total = year_stats.sum()
         avg = year_stats.mean()
         change, latest = compute_yoy_change(year_stats)
-        insights["zh"].append(f"統計期間共計 {total:,} 件交通事故，年均約 {avg:.0f} 件。")
-        insights["en"].append(f"A total of {total:,} traffic accidents during the reporting period, averaging {avg:.0f} cases per year.")
+        insights.append(f"統計期間共計 {total:,} 件交通事故，年均約 {avg:.0f} 件。")
         if change is not None:
-            direction_zh = "上升" if change > 0 else "下降"
-            direction_en = "increased" if change > 0 else "decreased"
-            insights["zh"].append(f"最新年度較前一年度 {direction_zh} {abs(change):.1f}%，事故趨勢{'值得關注' if change > 0 else '有所好轉'}。")
-            insights["en"].append(f"The latest year {direction_en} by {abs(change):.1f}% compared to the previous year, a {'concerning' if change > 0 else 'positive'} trend.")
-
+            direction = "上升" if change > 0 else "下降"
+            insights.append(f"最新年度較前一年度 {direction} {abs(change):.1f}%，事故趨勢{'值得關注' if change > 0 else '有所好轉'}。")
     if dc and dc in df.columns:
         total_deaths = df[dc].sum()
         if total_deaths > 0:
-            insights["zh"].append(f"統計期間累計死亡 {int(total_deaths)} 人，平均每件事故死亡風險約 {total_deaths/total:.3f} 人。")
-            insights["en"].append(f"Total fatalities: {int(total_deaths)} during the reporting period, averaging {total_deaths/total:.3f} deaths per accident.")
-
+            insights.append(f"統計期間累計死亡 {int(total_deaths)} 人，平均每件事故死亡風險約 {total_deaths/total:.3f} 人。")
     if ic and ic in df.columns:
         total_injuries = df[ic].sum()
         if total_injuries > 0:
-            insights["zh"].append(f"統計期間累計受傷 {int(total_injuries)} 人，平均每件事故受傷約 {total_injuries/total:.1f} 人。")
-            insights["en"].append(f"Total injuries: {int(total_injuries)} during the reporting period, averaging {total_injuries/total:.1f} injuries per accident.")
-
+            insights.append(f"統計期間累計受傷 {int(total_injuries)} 人，平均每件事故受傷約 {total_injuries/total:.1f} 人。")
     if ac and ac in df.columns and cc and cc in df.columns:
         area_stats = df.groupby(ac)[cc].sum().sort_values(ascending=False)
         if len(area_stats) > 0:
             top_district = area_stats.index[0]
             top_count = area_stats.iloc[0]
             pct = top_count / area_stats.sum() * 100
-            insights["zh"].append(f"{top_district} 為事故最高發行政區，佔總數 {pct:.1f}%（{int(top_count)} 件），建議優先改善路口設計與號誌配置。")
-            insights["en"].append(f"{top_district} is the highest-accident district, accounting for {pct:.1f}% ({int(top_count)} cases). Priority intersection improvements recommended.")
-
+            insights.append(f"{top_district} 為事故最高發行政區，佔總數 {pct:.1f}%（{int(top_count)} 件），建議優先改善路口設計與號誌配置。")
     if tc and tc in df.columns and cc and cc in df.columns:
         type_stats = df.groupby(tc)[cc].sum().sort_values(ascending=False)
         if len(type_stats) > 0:
             top_type = type_stats.index[0]
             top_count = type_stats.iloc[0]
             pct = top_count / type_stats.sum() * 100
-            insights["zh"].append(f"{top_type} 為最主要事故類型，佔總數 {pct:.1f}%（{int(top_count)} 件），應針對此類事故加強預防措施。")
-            insights["en"].append(f"{top_type} is the dominant accident type, accounting for {pct:.1f}% ({int(top_count)} cases). Targeted prevention measures recommended.")
-
+            insights.append(f"{top_type} 為最主要事故類型，佔總數 {pct:.1f}%（{int(top_count)} 件），應針對此類事故加強預防措施。")
     return insights
 
 
-def generate_violation_recommendations(a):
-    """Generate policy recommendations for violations"""
-    recs = {"zh": [], "en": []}
-    df = a["df"]
-    ac = a["ac"]
-    lc = a["lc"]
-    year_counts = a["year_counts"]
-
+def generate_violation_recommendations(df, ac, lc, year_counts):
+    recs = []
     change, _ = compute_yoy_change(year_counts) if year_counts is not None else (None, None)
-
     if change is not None and change > 5:
-        recs["zh"].append("違規案件呈現上升趨勢，建議加強高風險路段的固定與移動式執法強度，並導入科技執法設備。")
-        recs["en"].append("Rising violation trends suggest strengthening fixed and mobile enforcement at high-risk locations, and deploying automated enforcement technology.")
-
+        recs.append("違規案件呈現上升趨勢，建議加強高風險路段的固定與移動式執法強度，並導入科技執法設備。")
     if ac and ac in df.columns:
         area_counts = df[ac].value_counts()
         if len(area_counts) > 0:
-            top3 = ", ".join([str(x) for x in area_counts.head(3).index])
-            recs["zh"].append(f"優先於 {top3} 等高風險行政區設置違規舉發專案，結合社區宣導提升守法意識。")
-            recs["en"].append(f"Prioritize violation enforcement projects in high-risk districts: {top3}, combined with community education campaigns.")
-
+            top3 = "、".join([str(x) for x in area_counts.head(3).index])
+            recs.append(f"優先於 {top3} 等高風險行政區設置違規舉發專案，結合社區宣導提升守法意識。")
     if lc and lc in df.columns:
         law_counts = df[lc].value_counts()
         if len(law_counts) > 0:
             top_law = law_counts.index[0]
-            recs["zh"].append(f"針對 {top_law} 等高頻違規類型，建議加強駕駛人教育訓練與媒體宣導，並檢視相關法規罰則嚇阻效果。")
-            recs["en"].append(f"For high-frequency violations like {top_law}, enhance driver education and media campaigns, and review penalty deterrence effectiveness.")
-
-    if len(recs["zh"]) == 0:
-        recs["zh"].append("建議持續監測各行政區違規趨勢，並定期評估執法策略成效。")
-        recs["en"].append("Continue monitoring district-level violation trends and regularly evaluate enforcement strategy effectiveness.")
-
+            recs.append(f"針對 {top_law} 等高頻違規類型，建議加強駕駛人教育訓練與媒體宣導，並檢視相關法規罰則嚇阻效果。")
+    if len(recs) == 0:
+        recs.append("建議持續監測各行政區違規趨勢，並定期評估執法策略成效。")
     return recs
 
 
-def generate_accident_recommendations(a):
-    """Generate policy recommendations for accidents"""
-    recs = {"zh": [], "en": []}
-    df = a["df"]
-    ac = a["ac"]
-    tc = a["tc"]
-    cc = a["cc"]
-    dc = a["dc"]
-    year_stats = a["year_stats"]
-
+def generate_accident_recommendations(df, yc, ac, tc, cc, dc, year_stats):
+    recs = []
     change, _ = compute_yoy_change(year_stats) if year_stats is not None else (None, None)
-
     if change is not None and change > 5:
-        recs["zh"].append("事故件數呈現上升趨勢，建議啟動交通安全精進專案，針對高事故路口進行工程改善。")
-        recs["en"].append("Rising accident trends warrant launching a traffic safety enhancement project targeting high-accident intersections for engineering improvements.")
-
+        recs.append("事故件數呈現上升趨勢，建議啟動交通安全精進專案，針對高事故路口進行工程改善。")
     if dc and dc in df.columns:
         total_deaths = df[dc].sum()
         if total_deaths > 10:
-            recs["zh"].append(f"死亡事故累計達 {int(total_deaths)} 人，建議優先檢視行人保護設施、路口視距及速限管理措施。")
-            recs["en"].append(f"With {int(total_deaths)} total fatalities, prioritize reviewing pedestrian protection facilities, intersection sight distance, and speed limit management.")
-
+            recs.append(f"死亡事故累計達 {int(total_deaths)} 人，建議優先檢視行人保護設施、路口視距及速限管理措施。")
     if ac and ac in df.columns and cc and cc in df.columns:
         area_stats = df.groupby(ac)[cc].sum().sort_values(ascending=False)
         if len(area_stats) > 0:
-            top3 = ", ".join([str(x) for x in area_stats.head(3).index])
-            recs["zh"].append(f"針對 {top3} 等高事故行政區，建議進行道路安全稽核（Road Safety Audit）並優先改善事故熱點。")
-            recs["en"].append(f"For high-accident districts {top3}, conduct Road Safety Audits and prioritize hotspot improvements.")
-
+            top3 = "、".join([str(x) for x in area_stats.head(3).index])
+            recs.append(f"針對 {top3} 等高事故行政區，建議進行道路安全稽核並優先改善事故熱點。")
     if tc and tc in df.columns and cc and cc in df.columns:
         type_stats = df.groupby(tc)[cc].sum().sort_values(ascending=False)
         if len(type_stats) > 0:
             top_type = type_stats.index[0]
-            recs["zh"].append(f"{top_type} 為主要事故類型，建議分析其成因並設計針對性改善方案（如路口幾何調整、號誌時制優化）。")
-            recs["en"].append(f"{top_type} is the primary accident type. Analyze root causes and design targeted countermeasures (e.g., intersection geometry adjustments, signal timing optimization).")
-
-    if len(recs["zh"]) == 0:
-        recs["zh"].append("建議持續追蹤事故類型分布與行政區風險變化，並建立預警機制。")
-        recs["en"].append("Continue tracking accident type distributions and district risk changes, and establish an early warning mechanism.")
-
+            recs.append(f"{top_type} 為主要事故類型，建議分析其成因並設計針對性改善方案（如路口幾何調整、號誌時制優化）。")
+    if len(recs) == 0:
+        recs.append("建議持續追蹤事故類型分布與行政區風險變化，並建立預警機制。")
     return recs
 
 
-# ========== Violation Analysis ==========
-
 def analyze_violations():
     print("\n" + "=" * 60)
-    print("[Violation Data]")
+    print("【交通違規裁罰資料】")
     print("=" * 60)
 
-    df = fetch_dataset(VIOLATION_DATASET_ID, "Violations")
+    df = fetch_dataset(VIOLATION_DATASET_ID, "交通違規舉發")
     is_sample = False
     if df.empty:
-        print("  [Warning] API failed, using sample data")
+        print("  [警告] API 未取得資料，改用範例資料")
         df = sample_violations(5000)
         is_sample = True
 
-    yc = find_col(df, ["year","Year","YEAR"])
-    lc = find_col(df, ["law","Law","LAW"])
-    fc = find_col(df, ["fact","Fact","FACT"])
-    ac = find_col(df, ["AreaName","areaName","area","AREA"])
-    lac = find_col(df, ["latitude","Latitude","LATITUDE","lat","Lat"])
-    loc = find_col(df, ["longitude","Longitude","LONGITUDE","lon","Lng"])
-    rc = find_col(df, ["Road","road","ROAD"])
+    yc = find_col(df, ["year","Year","YEAR","年度","年"])
+    lc = find_col(df, ["law","Law","LAW","違反法條","法條"])
+    fc = find_col(df, ["fact","Fact","FACT","違規事實","事實"])
+    ac = find_col(df, ["AreaName","areaName","area","AREA","行政區","行政區名稱","區"])
+    lac = find_col(df, ["latitude","Latitude","LATITUDE","lat","Lat","緯度"])
+    loc = find_col(df, ["longitude","Longitude","LONGITUDE","lon","Lng","經度"])
+    rc = find_col(df, ["Road","road","ROAD","路段","路名"])
 
-    print(f"  Columns: year={yc}, law={lc}, fact={fc}, area={ac}, lat={lac}, lon={loc}")
+    print(f"  欄位對應: year={yc}, law={lc}, fact={fc}, area={ac}, lat={lac}, lon={loc}")
 
     years = []
     if yc and yc in df.columns:
         years = sorted(df[yc].dropna().unique())
         years = [int(y) if str(y).isdigit() else y for y in years]
         years = sorted(years)
-    print(f"  Years: {years}")
+    print(f"  資料年度: {years}")
 
     year_counts = df[yc].value_counts().sort_index() if yc else pd.Series(dtype=int)
     law_counts = df[lc].value_counts().head(20) if lc else pd.Series(dtype=int)
     fact_counts = df[fc].value_counts().head(20) if fc else pd.Series(dtype=int)
     area_counts = df[ac].value_counts() if ac else pd.Series(dtype=int)
 
-    # Compute KPIs
     total_cases = int(year_counts.sum()) if year_counts is not None else 0
     top_district = area_counts.index[0] if area_counts is not None and len(area_counts) > 0 else "N/A"
     top_law = law_counts.index[0] if law_counts is not None and len(law_counts) > 0 else "N/A"
     change, latest = compute_yoy_change(year_counts)
     avg_cases = year_counts.mean() if year_counts is not None else 0
 
-    insights = generate_violation_insights({
-        "df": df, "yc": yc, "ac": ac, "lc": lc,
-        "year_counts": year_counts, "area_counts": area_counts, "law_counts": law_counts
-    })
-    recommendations = generate_violation_recommendations({
-        "df": df, "yc": yc, "ac": ac, "lc": lc,
-        "year_counts": year_counts
-    })
+    insights = generate_violation_insights(df, yc, ac, lc, year_counts)
+    recommendations = generate_violation_recommendations(df, ac, lc, year_counts)
 
     return {
         "df": df, "is_sample": is_sample, "years": years,
@@ -520,14 +435,12 @@ def analyze_violations():
     }
 
 
-# ========== Violation Charts ==========
-
 def make_violation_charts(a):
     if a is None:
         return {}, []
     figs = {}
     all_figs = []
-    sn = " (Sample)" if a.get("is_sample") else ""
+    sn = "（範例資料）" if a.get("is_sample") else ""
     df = a["df"]
     yc = a["yc"]
     years = a["years"]
@@ -545,7 +458,7 @@ def make_violation_charts(a):
             fig.write_html(fn, include_plotlyjs="cdn")
             return os.path.basename(fn)
         except Exception as e:
-            print(f"    [Warning] {fn} failed: {e}")
+            print(f"    [警告] {fn} 失敗: {e}")
             return None
 
     def save_hbar(d, title, ylabel, xlabel, fn, cs, top=15):
@@ -560,33 +473,33 @@ def make_violation_charts(a):
             fig.write_html(fn, include_plotlyjs="cdn")
             return os.path.basename(fn)
         except Exception as e:
-            print(f"    [Warning] {fn} failed: {e}")
+            print(f"    [警告] {fn} 失敗: {e}")
             return None
 
-    print("\n  Generating all-year violation charts...")
-    all_figs.append(save_bar(a["year_counts"], f"Violation Cases by Year{sn}", "Year", "Cases", "docs/charts/violation_yearly_all.html", "Reds"))
-    all_figs.append(save_hbar(a["law_counts"], f"Top 15 Violation Laws{sn}", "Law", "Cases", "docs/charts/violation_laws_all.html", "Oranges"))
-    all_figs.append(save_hbar(a["fact_counts"], f"Top 15 Violation Facts{sn}", "Fact", "Cases", "docs/charts/violation_facts_all.html", "Blues"))
-    all_figs.append(save_bar(a["area_counts"], f"Violation Cases by District{sn}", "District", "Cases", "docs/charts/violation_area_all.html", "Purples"))
+    print("\n  生成全部年度違規圖表...")
+    all_figs.append(save_bar(a["year_counts"], f"各年度交通違規裁罰件數統計{sn}", "年度", "裁罰件數", "docs/charts/violation_yearly_all.html", "Reds"))
+    all_figs.append(save_hbar(a["law_counts"], f"主要違反法條 TOP 15{sn}", "違反法條", "件數", "docs/charts/violation_laws_all.html", "Oranges"))
+    all_figs.append(save_hbar(a["fact_counts"], f"主要違規事實 TOP 15{sn}", "違規事實", "件數", "docs/charts/violation_facts_all.html", "Blues"))
+    all_figs.append(save_bar(a["area_counts"], f"各行政區交通違規裁罰分布{sn}", "行政區", "裁罰件數", "docs/charts/violation_area_all.html", "Purples"))
 
     try:
         if yc and yc in df.columns and a["ac"] and a["ac"] in df.columns:
             pivot = df.groupby([yc, a["ac"]]).size().unstack(fill_value=0)
             if pivot.shape[0] > 0 and pivot.shape[1] > 0:
-                fig = px.imshow(pivot, labels=dict(x="District",y="Year",color="Cases"),
-                               title=f"Violation Heatmap by Year & District{sn}",
+                fig = px.imshow(pivot, labels=dict(x="行政區",y="年度",color="件數"),
+                               title=f"各年度行政區違規裁罰熱力圖{sn}",
                                aspect="auto", color_continuous_scale="YlOrRd")
                 fig.update_layout(template="plotly_white", height=500)
                 fig.write_html("docs/charts/violation_heatmap_all.html", include_plotlyjs="cdn")
                 all_figs.append("violation_heatmap_all.html")
-                print(f"    Generated: violation_heatmap_all.html")
+                print(f"    已生成: violation_heatmap_all.html")
     except Exception as e:
-        print(f"    [Warning] Heatmap failed: {e}")
+        print(f"    [警告] 熱力圖失敗: {e}")
 
     all_figs = [f for f in all_figs if f]
 
     if yc and years:
-        print(f"\n  Generating per-year violation charts ({len(years)} years)...")
+        print(f"\n  生成各年度違規圖表 ({len(years)} 個年度)...")
         for year in years:
             ydf = df[df[yc] == year]
             if len(ydf) == 0:
@@ -595,23 +508,21 @@ def make_violation_charts(a):
             yfigs = []
             yfigs.append(save_bar(
                 ydf[a["lc"]].value_counts().head(15) if a["lc"] else None,
-                f"{year_str} Top Violation Laws{sn}", "Law", "Cases",
+                f"{year_str}年 主要違反法條 TOP 15{sn}", "違反法條", "件數",
                 f"docs/charts/violation_laws_{year_str}.html", "Oranges"))
             yfigs.append(save_bar(
                 ydf[a["fc"]].value_counts().head(15) if a["fc"] else None,
-                f"{year_str} Top Violation Facts{sn}", "Fact", "Cases",
+                f"{year_str}年 主要違規事實 TOP 15{sn}", "違規事實", "件數",
                 f"docs/charts/violation_facts_{year_str}.html", "Blues"))
             yfigs.append(save_bar(
                 ydf[a["ac"]].value_counts() if a["ac"] else None,
-                f"{year_str} Cases by District{sn}", "District", "Cases",
+                f"{year_str}年 各行政區交通違規裁罰分布{sn}", "行政區", "裁罰件數",
                 f"docs/charts/violation_area_{year_str}.html", "Purples"))
             figs[year_str] = [f for f in yfigs if f]
 
-    print(f"  Violation charts: {len(all_figs)} all-year, {len(figs)} year groups")
+    print(f"  違規圖表: 全部 {len(all_figs)} 個, 年度 {len(figs)} 組")
     return figs, all_figs
 
-
-# ========== Violation Maps ==========
 
 def make_violation_maps(a):
     if a is None:
@@ -619,10 +530,10 @@ def make_violation_maps(a):
     df, lac, loc = a["df"], a["lac"], a["loc"]
     yc, lc, fc, ac, rc = a["yc"], a["lc"], a["fc"], a["ac"], a["rc"]
     years = a["years"]
-    sn = " (Sample)" if a.get("is_sample") else ""
+    sn = "（範例資料）" if a.get("is_sample") else ""
 
     if not lac or lac not in df.columns or not loc or loc not in df.columns:
-        print("  [Info] Missing coordinates, skipping violation maps")
+        print("  [資訊] 缺少座標資料，略過違規地圖")
         return {}, None
 
     dm = df.copy()
@@ -630,12 +541,12 @@ def make_violation_maps(a):
     dm[loc] = pd.to_numeric(dm[loc], errors="coerce")
     dm = dm.dropna(subset=[lac, loc])
     if len(dm) == 0:
-        print("  [Info] No valid coordinates")
+        print("  [資訊] 無有效座標")
         return {}, None
 
     year_maps = {}
 
-    print("\n  Generating combined violation map (all years as layers)...")
+    print("\n  生成違規綜合地圖(全部年度分層)...")
     try:
         m_all = folium.Map(location=[dm[lac].median(), dm[loc].median()], zoom_start=11)
         add_free_basemaps(m_all)
@@ -645,14 +556,14 @@ def make_violation_maps(a):
                 ydf = dm[dm[yc] == year]
                 if len(ydf) == 0:
                     continue
-                fg = folium.FeatureGroup(name=f"{year} Violations{sn}")
+                fg = folium.FeatureGroup(name=f"{year}年違規點位{sn}")
                 mc = MarkerCluster().add_to(fg)
                 for _, row in ydf.iterrows():
-                    popup = f"<b>Year:</b> {row.get(yc,'N/A')}<br>"
-                    if ac: popup += f"<b>District:</b> {row.get(ac,'N/A')}<br>"
-                    if rc: popup += f"<b>Road:</b> {row.get(rc,'N/A')}<br>"
-                    if lc: popup += f"<b>Law:</b> {str(row.get(lc,'N/A'))[:50]}<br>"
-                    if fc: popup += f"<b>Fact:</b> {str(row.get(fc,'N/A'))[:50]}"
+                    popup = f"<b>年度:</b> {row.get(yc,'N/A')}<br>"
+                    if ac: popup += f"<b>行政區:</b> {row.get(ac,'N/A')}<br>"
+                    if rc: popup += f"<b>路段:</b> {row.get(rc,'N/A')}<br>"
+                    if lc: popup += f"<b>法條:</b> {str(row.get(lc,'N/A'))[:50]}<br>"
+                    if fc: popup += f"<b>事實:</b> {str(row.get(fc,'N/A'))[:50]}"
                     folium.CircleMarker(location=[row[lac],row[loc]], radius=3,
                         popup=folium.Popup(popup,max_width=300),
                         color="red", fill=True, fill_opacity=0.6).add_to(mc)
@@ -661,24 +572,24 @@ def make_violation_maps(a):
             mc = MarkerCluster().add_to(m_all)
             for _, row in dm.iterrows():
                 popup = ""
-                if ac: popup += f"<b>District:</b> {row.get(ac,'N/A')}<br>"
-                if rc: popup += f"<b>Road:</b> {row.get(rc,'N/A')}<br>"
-                if lc: popup += f"<b>Law:</b> {str(row.get(lc,'N/A'))[:50]}"
+                if ac: popup += f"<b>行政區:</b> {row.get(ac,'N/A')}<br>"
+                if rc: popup += f"<b>路段:</b> {row.get(rc,'N/A')}<br>"
+                if lc: popup += f"<b>法條:</b> {str(row.get(lc,'N/A'))[:50]}"
                 folium.CircleMarker(location=[row[lac],row[loc]], radius=3,
                     popup=folium.Popup(popup,max_width=300),
                     color="red", fill=True, fill_opacity=0.6).add_to(mc)
 
         folium.LayerControl(collapsed=False).add_to(m_all)
         m_all.save("docs/maps/violation_map_all.html")
-        print(f"    Generated: maps/violation_map_all.html")
+        print(f"    已生成: maps/violation_map_all.html")
         all_map = "maps/violation_map_all.html"
     except Exception as e:
-        print(f"    [Warning] Combined map failed: {e}")
+        print(f"    [警告] 綜合地圖失敗: {e}")
         traceback.print_exc()
         all_map = None
 
     if yc and years:
-        print(f"\n  Generating per-year violation maps ({len(years)} years)...")
+        print(f"\n  生成各年度違規地圖 ({len(years)} 個)...")
         for year in years:
             try:
                 ydf = dm[dm[yc] == year]
@@ -689,58 +600,56 @@ def make_violation_maps(a):
                 add_free_basemaps(m)
                 mc = MarkerCluster().add_to(m)
                 for _, row in ydf.iterrows():
-                    popup = f"<b>Year:</b> {row.get(yc,'N/A')}<br>"
-                    if ac: popup += f"<b>District:</b> {row.get(ac,'N/A')}<br>"
-                    if rc: popup += f"<b>Road:</b> {row.get(rc,'N/A')}<br>"
-                    if lc: popup += f"<b>Law:</b> {str(row.get(lc,'N/A'))[:50]}<br>"
-                    if fc: popup += f"<b>Fact:</b> {str(row.get(fc,'N/A'))[:50]}"
+                    popup = f"<b>年度:</b> {row.get(yc,'N/A')}<br>"
+                    if ac: popup += f"<b>行政區:</b> {row.get(ac,'N/A')}<br>"
+                    if rc: popup += f"<b>路段:</b> {row.get(rc,'N/A')}<br>"
+                    if lc: popup += f"<b>法條:</b> {str(row.get(lc,'N/A'))[:50]}<br>"
+                    if fc: popup += f"<b>事實:</b> {str(row.get(fc,'N/A'))[:50]}"
                     folium.CircleMarker(location=[row[lac],row[loc]], radius=3,
                         popup=folium.Popup(popup,max_width=300),
                         color="red", fill=True, fill_opacity=0.6).add_to(mc)
                 folium.LayerControl().add_to(m)
                 m.save(f"docs/maps/violation_map_{year_str}.html")
                 year_maps[year_str] = f"maps/violation_map_{year_str}.html"
-                print(f"    Generated: maps/violation_map_{year_str}.html")
+                print(f"    已生成: maps/violation_map_{year_str}.html")
             except Exception as e:
-                print(f"    [Warning] {year} map failed: {e}")
+                print(f"    [警告] {year}年地圖失敗: {e}")
 
-    print(f"  Violation maps: 1 combined, {len(year_maps)} per-year")
+    print(f"  違規地圖: 綜合 1 個, 年度 {len(year_maps)} 個")
     return year_maps, all_map
 
 
-# ========== Accident Analysis ==========
-
 def analyze_accidents():
     print("\n" + "=" * 60)
-    print("[Accident Data]")
+    print("【交通事故資料】")
     print("=" * 60)
 
     df = pd.DataFrame()
     used_id = None
     for ds_id in ACCIDENT_DATASET_IDS:
-        df = fetch_dataset(ds_id, "Accidents")
+        df = fetch_dataset(ds_id, "交通事故")
         if not df.empty:
             used_id = ds_id
             break
 
     is_sample = False
     if df.empty:
-        print("  [Warning] All accident APIs failed, using sample data")
+        print("  [警告] 所有事故 API 均失敗，改用範例資料")
         df = sample_accidents(3000)
         is_sample = True
 
-    print(f"  Using: {used_id or 'sample data'}")
+    print(f"  使用: {used_id or '範例資料'}")
 
-    yc = find_col(df, ["year","Year","YEAR"])
-    tc = find_col(df, ["type","Type","TYPE","accident_type"])
-    ac = find_col(df, ["area","Area","AREA","district"])
-    pc = find_col(df, ["place","Place","location"])
-    vc = find_col(df, ["vehicle","Vehicle","vehicle_type"])
-    cc = find_col(df, ["count","Count","case_count"])
-    dc = find_col(df, ["death","Death","deaths"])
-    ic = find_col(df, ["injury","Injury","injuries"])
+    yc = find_col(df, ["year","Year","YEAR","年度","年","發生年度"])
+    tc = find_col(df, ["type","Type","TYPE","事故類別","事故類別名稱","類別"])
+    ac = find_col(df, ["area","Area","AREA","發生市區鄉鎮名稱","行政區","區"])
+    pc = find_col(df, ["place","Place","場所","事故位置","位置"])
+    vc = find_col(df, ["vehicle","Vehicle","車種","當事者使用車種_大類別","運具"])
+    cc = find_col(df, ["count","Count","案件總數","總數","件數"])
+    dc = find_col(df, ["death","Death","死亡","死亡人數"])
+    ic = find_col(df, ["injury","Injury","受傷","受傷人數"])
 
-    print(f"  Columns: year={yc}, type={tc}, area={ac}, count={cc}, death={dc}, injury={ic}")
+    print(f"  欄位對應: year={yc}, type={tc}, area={ac}, count={cc}, death={dc}, injury={ic}")
 
     for col in [cc, dc, ic]:
         if col and col in df.columns:
@@ -750,7 +659,7 @@ def analyze_accidents():
     if yc and yc in df.columns:
         df[yc] = df[yc].astype(str)
         years = sorted(df[yc].dropna().unique())
-    print(f"  Years: {years}")
+    print(f"  資料年度: {years}")
 
     year_stats = None
     if yc and yc in df.columns:
@@ -764,13 +673,12 @@ def analyze_accidents():
     dis = None
     if yc and yc in df.columns:
         agg = {}
-        if cc: agg["Total Cases"] = (cc, "sum")
-        if dc: agg["Total Deaths"] = (dc, "sum")
-        if ic: agg["Total Injuries"] = (ic, "sum")
+        if cc: agg["案件總數"] = (cc, "sum")
+        if dc: agg["死亡總數"] = (dc, "sum")
+        if ic: agg["受傷總數"] = (ic, "sum")
         if agg:
             dis = df.groupby(yc).agg(**agg)
 
-    # KPIs
     total_cases = int(year_stats.sum()) if year_stats is not None else 0
     total_deaths = int(df[dc].sum()) if dc and dc in df.columns else 0
     total_injuries = int(df[ic].sum()) if ic and ic in df.columns else 0
@@ -779,14 +687,8 @@ def analyze_accidents():
     change, latest = compute_yoy_change(year_stats)
     avg_cases = year_stats.mean() if year_stats is not None else 0
 
-    insights = generate_accident_insights({
-        "df": df, "yc": yc, "ac": ac, "tc": tc, "cc": cc, "dc": dc, "ic": ic,
-        "year_stats": year_stats, "area_stats": area_stats, "type_stats": type_stats
-    })
-    recommendations = generate_accident_recommendations({
-        "df": df, "yc": yc, "ac": ac, "tc": tc, "cc": cc, "dc": dc,
-        "year_stats": year_stats
-    })
+    insights = generate_accident_insights(df, yc, ac, tc, cc, dc, ic, year_stats)
+    recommendations = generate_accident_recommendations(df, yc, ac, tc, cc, dc, year_stats)
 
     return {
         "df": df, "is_sample": is_sample, "years": years,
@@ -807,14 +709,12 @@ def analyze_accidents():
     }
 
 
-# ========== Accident Charts ==========
-
 def make_accident_charts(a):
     if a is None:
         return {}, []
     figs = {}
     all_figs = []
-    sn = " (Sample)" if a.get("is_sample") else ""
+    sn = "（範例資料）" if a.get("is_sample") else ""
     df = a["df"]
     yc = a["yc"]
     years = a["years"]
@@ -832,56 +732,56 @@ def make_accident_charts(a):
             fig.write_html(fn, include_plotlyjs="cdn")
             return os.path.basename(fn)
         except Exception as e:
-            print(f"    [Warning] {fn} failed: {e}")
+            print(f"    [警告] {fn} 失敗: {e}")
             return None
 
-    print("\n  Generating all-year accident charts...")
+    print("\n  生成全部年度事故圖表...")
 
-    all_figs.append(save_bar(a["year_stats"], f"Accident Cases by Year{sn}", "Year", "Cases", "docs/charts/accident_yearly_all.html", "Reds"))
+    all_figs.append(save_bar(a["year_stats"], f"各年度交通事故件數統計{sn}", "年度", "事故件數", "docs/charts/accident_yearly_all.html", "Reds"))
 
     try:
         d = a["type_stats"]
         if d is not None and len(d) > 0:
-            fig = px.pie(names=d.index, values=d.values, title=f"Accident Types{sn}", hole=0.4)
+            fig = px.pie(names=d.index, values=d.values, title=f"主要事故類別分布{sn}", hole=0.4)
             fig.update_traces(textposition="inside", textinfo="percent+label")
             fig.update_layout(template="plotly_white")
             fig.write_html("docs/charts/accident_type_all.html", include_plotlyjs="cdn")
             all_figs.append("accident_type_all.html")
-            print(f"    Generated: accident_type_all.html")
+            print(f"    已生成: accident_type_all.html")
     except Exception as e:
-        print(f"    [Warning] Type pie failed: {e}")
+        print(f"    [警告] 類別分布失敗: {e}")
 
-    all_figs.append(save_bar(a["area_stats"], f"Accidents by District{sn}", "District", "Cases", "docs/charts/accident_area_all.html", "Oranges"))
+    all_figs.append(save_bar(a["area_stats"], f"各行政區交通事故分布{sn}", "地區", "事故件數", "docs/charts/accident_area_all.html", "Oranges"))
 
     try:
         d = a["place_stats"]
         if d is not None and len(d) > 0:
             d15 = d.head(15)
             fig = px.bar(y=d15.index[::-1], x=d15.values[::-1],
-                         orientation="h", labels={"y":"Place","x":"Cases"},
-                         title=f"Top 15 Accident Places{sn}",
+                         orientation="h", labels={"y":"場所類別","x":"事故件數"},
+                         title=f"事故場所類別分布 TOP 15{sn}",
                          color=d15.values[::-1], color_continuous_scale="Blues")
             fig.update_layout(template="plotly_white")
             fig.write_html("docs/charts/accident_place_all.html", include_plotlyjs="cdn")
             all_figs.append("accident_place_all.html")
-            print(f"    Generated: accident_place_all.html")
+            print(f"    已生成: accident_place_all.html")
     except Exception as e:
-        print(f"    [Warning] Place chart failed: {e}")
+        print(f"    [警告] 場所分布失敗: {e}")
 
     try:
         d = a["vehicle_stats"]
         if d is not None and len(d) > 0:
             d15 = d.head(15)
             fig = px.bar(y=d15.index[::-1], x=d15.values[::-1],
-                         orientation="h", labels={"y":"Vehicle","x":"Cases"},
-                         title=f"Top 15 Vehicle Types{sn}",
+                         orientation="h", labels={"y":"運具類別","x":"事故件數"},
+                         title=f"事故運具類別分布 TOP 15{sn}",
                          color=d15.values[::-1], color_continuous_scale="Greens")
             fig.update_layout(template="plotly_white")
             fig.write_html("docs/charts/accident_vehicle_all.html", include_plotlyjs="cdn")
             all_figs.append("accident_vehicle_all.html")
-            print(f"    Generated: accident_vehicle_all.html")
+            print(f"    已生成: accident_vehicle_all.html")
     except Exception as e:
-        print(f"    [Warning] Vehicle chart failed: {e}")
+        print(f"    [警告] 運具分布失敗: {e}")
 
     try:
         dis = a["dis"]
@@ -890,19 +790,19 @@ def make_accident_charts(a):
             for col in dis.columns:
                 fig.add_trace(go.Scatter(x=dis.index.astype(str), y=dis[col].values,
                                          mode="lines+markers", name=col))
-            fig.update_layout(title=f"Casualty Trend by Year{sn}",
-                              xaxis_title="Year", yaxis_title="Count", template="plotly_white",
+            fig.update_layout(title=f"各年度交通事故傷亡趨勢{sn}",
+                              xaxis_title="年度", yaxis_title="人數/件數", template="plotly_white",
                               legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             fig.write_html("docs/charts/accident_casualty_all.html", include_plotlyjs="cdn")
             all_figs.append("accident_casualty_all.html")
-            print(f"    Generated: accident_casualty_all.html")
+            print(f"    已生成: accident_casualty_all.html")
     except Exception as e:
-        print(f"    [Warning] Casualty trend failed: {e}")
+        print(f"    [警告] 傷亡趨勢失敗: {e}")
 
     all_figs = [f for f in all_figs if f]
 
     if yc and years:
-        print(f"\n  Generating per-year accident charts ({len(years)} years)...")
+        print(f"\n  生成各年度事故圖表 ({len(years)} 個年度)...")
         for year in years:
             ydf = df[df[yc] == year]
             if len(ydf) == 0:
@@ -911,27 +811,25 @@ def make_accident_charts(a):
             yfigs = []
             yfigs.append(save_bar(
                 ydf[a["tc"]].value_counts().head(15) if a["tc"] else None,
-                f"{year_str} Accident Types{sn}", "Type", "Cases",
+                f"{year_str}年 主要事故類別分布{sn}", "事故類別", "件數",
                 f"docs/charts/accident_type_{year_str}.html", "Oranges"))
             yfigs.append(save_bar(
                 ydf[a["ac"]].value_counts() if a["ac"] else None,
-                f"{year_str} Accidents by District{sn}", "District", "Cases",
+                f"{year_str}年 各行政區交通事故分布{sn}", "地區", "事故件數",
                 f"docs/charts/accident_area_{year_str}.html", "Purples"))
             yfigs.append(save_bar(
                 ydf[a["pc"]].value_counts().head(15) if a["pc"] else None,
-                f"{year_str} Top Places{sn}", "Place", "Cases",
+                f"{year_str}年 事故場所類別分布 TOP 15{sn}", "場所類別", "件數",
                 f"docs/charts/accident_place_{year_str}.html", "Blues"))
             yfigs.append(save_bar(
                 ydf[a["vc"]].value_counts().head(15) if a["vc"] else None,
-                f"{year_str} Top Vehicles{sn}", "Vehicle", "Cases",
+                f"{year_str}年 事故運具類別分布 TOP 15{sn}", "運具類別", "件數",
                 f"docs/charts/accident_vehicle_{year_str}.html", "Greens"))
             figs[year_str] = [f for f in yfigs if f]
 
-    print(f"  Accident charts: {len(all_figs)} all-year, {len(figs)} year groups")
+    print(f"  事故圖表: 全部 {len(all_figs)} 個, 年度 {len(figs)} 組")
     return figs, all_figs
 
-
-# ========== Accident Maps ==========
 
 def make_accident_maps(a):
     if a is None:
@@ -939,15 +837,15 @@ def make_accident_maps(a):
     df = a["df"]
     ac, cc, dc, ic, yc = a["ac"], a["cc"], a["dc"], a["ic"], a["yc"]
     years = a["years"]
-    sn = " (Sample)" if a.get("is_sample") else ""
+    sn = "（範例資料）" if a.get("is_sample") else ""
 
     if not ac or ac not in df.columns:
-        print("  [Info] Missing district data, skipping accident maps")
+        print("  [資訊] 缺少行政區資料，略過事故地圖")
         return {}, None
 
     year_maps = {}
 
-    print("\n  Generating combined accident map (all years as layers)...")
+    print("\n  生成事故綜合地圖(全部年度分層)...")
     try:
         m_all = folium.Map(location=[24.95, 121.25], zoom_start=10)
         add_free_basemaps(m_all)
@@ -957,7 +855,7 @@ def make_accident_maps(a):
                 ydf = df[df[yc] == year]
                 if len(ydf) == 0:
                     continue
-                fg = folium.FeatureGroup(name=f"{year} Accidents{sn}")
+                fg = folium.FeatureGroup(name=f"{year}年事故熱點{sn}")
                 if ac in ydf.columns:
                     summary = ydf.groupby(ac)[cc].sum() if cc else ydf[ac].value_counts()
                     for area, count in summary.items():
@@ -968,11 +866,11 @@ def make_accident_maps(a):
                                 break
                         if coords:
                             r = min(max(float(count)**0.5*2, 5), 50)
-                            popup = f"<b>{year} {area}</b><br>Cases: {int(count)}"
+                            popup = f"<b>{year}年 {area}</b><br>事故件數: {int(count)}"
                             if dc and dc in ydf.columns:
-                                popup += f"<br>Deaths: {int(ydf[ydf[ac]==area][dc].sum())}"
+                                popup += f"<br>死亡: {int(ydf[ydf[ac]==area][dc].sum())}"
                             if ic and ic in ydf.columns:
-                                popup += f"<br>Injuries: {int(ydf[ydf[ac]==area][ic].sum())}"
+                                popup += f"<br>受傷: {int(ydf[ydf[ac]==area][ic].sum())}"
                             folium.CircleMarker(location=coords, radius=r,
                                 popup=folium.Popup(popup,max_width=250),
                                 color="orange", fill=True, fill_color="orange", fill_opacity=0.6).add_to(fg)
@@ -988,20 +886,20 @@ def make_accident_maps(a):
                 if coords:
                     r = min(max(float(count)**0.5*2, 5), 50)
                     folium.CircleMarker(location=coords, radius=r,
-                        popup=folium.Popup(f"<b>{area}</b><br>Cases: {int(count)}",max_width=250),
+                        popup=folium.Popup(f"<b>{area}</b><br>事故件數: {int(count)}",max_width=250),
                         color="orange", fill=True, fill_color="orange", fill_opacity=0.6).add_to(m_all)
 
         folium.LayerControl(collapsed=False).add_to(m_all)
         m_all.save("docs/maps/accident_map_all.html")
-        print(f"    Generated: maps/accident_map_all.html")
+        print(f"    已生成: maps/accident_map_all.html")
         all_map = "maps/accident_map_all.html"
     except Exception as e:
-        print(f"    [Warning] Combined map failed: {e}")
+        print(f"    [警告] 綜合地圖失敗: {e}")
         traceback.print_exc()
         all_map = None
 
     if yc and years:
-        print(f"\n  Generating per-year accident maps ({len(years)} years)...")
+        print(f"\n  生成各年度事故地圖 ({len(years)} 個)...")
         for year in years:
             try:
                 ydf = df[df[yc] == year]
@@ -1019,26 +917,24 @@ def make_accident_maps(a):
                             break
                     if coords:
                         r = min(max(float(count)**0.5*2, 5), 50)
-                        popup = f"<b>{year} {area}</b><br>Cases: {int(count)}"
+                        popup = f"<b>{year}年 {area}</b><br>事故件數: {int(count)}"
                         if dc and dc in ydf.columns:
-                            popup += f"<br>Deaths: {int(ydf[ydf[ac]==area][dc].sum())}"
+                            popup += f"<br>死亡: {int(ydf[ydf[ac]==area][dc].sum())}"
                         if ic and ic in ydf.columns:
-                            popup += f"<br>Injuries: {int(ydf[ydf[ac]==area][ic].sum())}"
+                            popup += f"<br>受傷: {int(ydf[ydf[ac]==area][ic].sum())}"
                         folium.CircleMarker(location=coords, radius=r,
                             popup=folium.Popup(popup,max_width=250),
                             color="orange", fill=True, fill_color="orange", fill_opacity=0.6).add_to(m)
                 folium.LayerControl().add_to(m)
                 m.save(f"docs/maps/accident_map_{year_str}.html")
                 year_maps[year_str] = f"maps/accident_map_{year_str}.html"
-                print(f"    Generated: maps/accident_map_{year_str}.html")
+                print(f"    已生成: maps/accident_map_{year_str}.html")
             except Exception as e:
-                print(f"    [Warning] {year} map failed: {e}")
+                print(f"    [警告] {year}年地圖失敗: {e}")
 
-    print(f"  Accident maps: 1 combined, {len(year_maps)} per-year")
+    print(f"  事故地圖: 綜合 1 個, 年度 {len(year_maps)} 個")
     return year_maps, all_map
 
-
-# ========== Bilingual HTML Report ==========
 
 def generate_index(v_data, a_data):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1050,8 +946,8 @@ def generate_index(v_data, a_data):
     v_years = v_data.get("years", [])
     v_sample = v_data.get("is_sample", False)
     v_kpi = v_data.get("kpi", {})
-    v_insights = v_data.get("insights", {"zh": [], "en": []})
-    v_recommendations = v_data.get("recommendations", {"zh": [], "en": []})
+    v_insights = v_data.get("insights", [])
+    v_recommendations = v_data.get("recommendations", [])
 
     a_year_figs = a_data.get("year_figs", {})
     a_all_figs = a_data.get("all_figs", [])
@@ -1060,28 +956,63 @@ def generate_index(v_data, a_data):
     a_years = a_data.get("years", [])
     a_sample = a_data.get("is_sample", False)
     a_kpi = a_data.get("kpi", {})
-    a_insights = a_data.get("insights", {"zh": [], "en": []})
-    a_recommendations = a_data.get("recommendations", {"zh": [], "en": []})
+    a_insights = a_data.get("insights", [])
+    a_recommendations = a_data.get("recommendations", [])
 
     all_years = sorted(set([str(y) for y in v_years] + [str(y) for y in a_years]))
 
     sample_banner = ""
     if v_sample or a_sample:
-        sample_banner = '<div class="sample-banner" data-zh="注意：目前顯示範例資料。API 可能因網路或資料集異動失敗，請查看 GitHub Actions 日誌。" data-en="Note: Currently displaying sample data. API connection may have failed. Check GitHub Actions logs."></div>'
+        sample_banner = '<div style="background:#fff3cd;border:1px solid #ffeaa7;border-radius:8px;padding:1rem;margin:1rem 0;text-align:center;color:#856404;"><strong>注意：</strong>目前顯示範例資料。API 可能因網路或資料集異動失敗，請查看 GitHub Actions 日誌。</div>'
 
-    year_options = '<option value="all" data-zh="全部年度" data-en="All Years"></option>\n'
+    year_options = '<option value="all">全部年度</option>\n'
     for year in all_years:
-        year_options += f'    <option value="{year}" data-zh="{year}年" data-en="{year}"></option>\n'
+        year_options += f'    <option value="{year}">{year}年</option>\n'
+
+    chart_switch_js = """
+function switchCharts(section, year) {
+    var allContainer = document.getElementById(section + '_charts_all');
+    if (allContainer) allContainer.style.display = 'none';
+    document.querySelectorAll('[id^="' + section + '_charts_"]').forEach(function(el) {
+        if (el.id !== section + '_charts_all') el.style.display = 'none';
+    });
+    if (year === 'all') {
+        if (allContainer) allContainer.style.display = 'grid';
+    } else {
+        var target = document.getElementById(section + '_charts_' + year);
+        if (target) target.style.display = 'grid';
+    }
+}
+
+function switchMap(section, year) {
+    var allFrame = document.getElementById(section + '_map_all');
+    if (allFrame) allFrame.style.display = 'none';
+    document.querySelectorAll('[id^="' + section + '_map_"]').forEach(function(el) {
+        if (el.id !== section + '_map_all') el.style.display = 'none';
+    });
+    if (year === 'all') {
+        if (allFrame) allFrame.style.display = 'block';
+    } else {
+        var target = document.getElementById(section + '_map_' + year);
+        if (target) target.style.display = 'block';
+    }
+}
+
+function switchYear(section, year) {
+    switchCharts(section, year);
+    switchMap(section, year);
+}
+"""
 
     def build_chart_grid(filenames, section, year_key):
         if not filenames:
-            return '<p class="no-data" data-zh="暫無資料" data-en="No data available"></p>'
+            return '<p style="padding:2rem;color:#888;text-align:center;">暫無資料</p>'
         display = "grid" if year_key == "all" else "none"
         html = f'<div id="{section}_charts_{year_key}" class="chart-grid" style="display:{display};">'
         for fn in filenames:
             if not fn:
                 continue
-            name = fn.replace(".html","").replace("violation_","").replace("accident_","").replace("_all","").replace("_"," ").title()
+            name = fn.replace(".html","").replace("violation_","").replace("accident_","").replace("_all","").replace("_"," ")
             path = f"charts/{fn}"
             html += f'<div class="chart-card"><h3>{name}</h3><iframe src="{path}" width="100%" height="450"></iframe></div>'
         html += '</div>'
@@ -1089,11 +1020,10 @@ def generate_index(v_data, a_data):
 
     def build_map(filename, section, year_key):
         if not filename:
-            return '<p class="no-data" data-zh="暫無地圖資料" data-en="No map data available"></p>'
+            return '<p style="padding:2rem;color:#888;text-align:center;">暫無地圖資料</p>'
         display = "block" if year_key == "all" else "none"
         return f'<iframe id="{section}_map_{year_key}" src="{filename}" width="100%" height="600" style="display:{display};border-radius:8px;border:none;"></iframe>'
 
-    # Violation section
     v_charts_html = build_chart_grid(v_all_figs, "violation", "all")
     for year, filenames in v_year_figs.items():
         v_charts_html += build_chart_grid(filenames, "violation", year)
@@ -1104,9 +1034,8 @@ def generate_index(v_data, a_data):
     for year, filename in v_year_maps.items():
         v_maps_html += build_map(filename, "violation", year)
     if not v_maps_html:
-        v_maps_html = '<p class="no-data" data-zh="暫無地圖資料" data-en="No map data available"></p>'
+        v_maps_html = '<p style="padding:2rem;color:#888;text-align:center;">暫無地圖資料</p>'
 
-    # Accident section
     a_charts_html = build_chart_grid(a_all_figs, "accident", "all")
     for year, filenames in a_year_figs.items():
         a_charts_html += build_chart_grid(filenames, "accident", year)
@@ -1117,83 +1046,52 @@ def generate_index(v_data, a_data):
     for year, filename in a_year_maps.items():
         a_maps_html += build_map(filename, "accident", year)
     if not a_maps_html:
-        a_maps_html = '<p class="no-data" data-zh="暫無地圖資料" data-en="No map data available"></p>'
+        a_maps_html = '<p style="padding:2rem;color:#888;text-align:center;">暫無地圖資料</p>'
 
-    # KPI cards
-    def kpi_card(icon, label_key, value, unit="", color="#1a5276"):
-        label_zh = {"total_cases": "總案件數", "total_deaths": "死亡人數", "total_injuries": "受傷人數",
-                    "top_district": "最高風險行政區", "top_violation": "主要違規類型", "top_accident": "主要事故類型",
-                    "yoy_change": "年度變化", "avg_cases": "年均案件數"}.get(label_key, label_key)
-        label_en = {"total_cases": "Total Cases", "total_deaths": "Deaths", "total_injuries": "Injuries",
-                    "top_district": "Highest Risk District", "top_violation": "Top Violation", "top_accident": "Top Accident Type",
-                    "yoy_change": "YoY Change", "avg_cases": "Avg Cases/Year"}.get(label_key, label_key)
+    def kpi_card(icon, label, value, unit="", color="#1a5276"):
         return f'''<div class="kpi-card" style="border-top-color:{color}">
   <div class="kpi-icon">{icon}</div>
-  <div class="kpi-label" data-zh="{label_zh}" data-en="{label_en}"></div>
+  <div class="kpi-label">{label}</div>
   <div class="kpi-value">{value}<span class="kpi-unit">{unit}</span></div>
 </div>'''
 
-    # Violation KPIs
     v_change = v_kpi.get("yoy_change")
     v_change_str = f"{v_change:+.1f}%" if v_change is not None else "N/A"
     v_change_color = "#e74c3c" if v_change and v_change > 0 else "#27ae60" if v_change and v_change < 0 else "#1a5276"
 
     v_kpi_html = '<div class="kpi-grid">\n'
-    v_kpi_html += kpi_card("&#128203;", "total_cases", f"{v_kpi.get('total_cases', 0):,}")
-    v_kpi_html += kpi_card("&#128200;", "yoy_change", v_change_str, color=v_change_color)
-    v_kpi_html += kpi_card("&#128205;", "avg_cases", f"{v_kpi.get('avg_cases', 0):.0f}")
-    v_kpi_html += kpi_card("&#128681;", "top_district", v_kpi.get('top_district', 'N/A'))
-    v_kpi_html += kpi_card("&#9888;", "top_violation", v_kpi.get('top_violation', 'N/A'))
+    v_kpi_html += kpi_card("&#128203;", "總案件數", f"{v_kpi.get('total_cases', 0):,}")
+    v_kpi_html += kpi_card("&#128200;", "年度變化", v_change_str, color=v_change_color)
+    v_kpi_html += kpi_card("&#128205;", "年均案件數", f"{v_kpi.get('avg_cases', 0):.0f}")
+    v_kpi_html += kpi_card("&#128681;", "最高風險行政區", v_kpi.get('top_district', 'N/A'))
+    v_kpi_html += kpi_card("&#9888;", "主要違規類型", v_kpi.get('top_violation', 'N/A'))
     v_kpi_html += '</div>'
 
-    # Accident KPIs
     a_change = a_kpi.get("yoy_change")
     a_change_str = f"{a_change:+.1f}%" if a_change is not None else "N/A"
     a_change_color = "#e74c3c" if a_change and a_change > 0 else "#27ae60" if a_change and a_change < 0 else "#1a5276"
 
     a_kpi_html = '<div class="kpi-grid">\n'
-    a_kpi_html += kpi_card("&#128203;", "total_cases", f"{a_kpi.get('total_cases', 0):,}")
-    a_kpi_html += kpi_card("&#128128;", "total_deaths", f"{a_kpi.get('total_deaths', 0):,}")
-    a_kpi_html += kpi_card("&#129657;", "total_injuries", f"{a_kpi.get('total_injuries', 0):,}")
-    a_kpi_html += kpi_card("&#128200;", "yoy_change", a_change_str, color=a_change_color)
-    a_kpi_html += kpi_card("&#128205;", "avg_cases", f"{a_kpi.get('avg_cases', 0):.0f}")
-    a_kpi_html += kpi_card("&#128681;", "top_district", a_kpi.get('top_district', 'N/A'))
-    a_kpi_html += kpi_card("&#9888;", "top_accident", a_kpi.get('top_type', 'N/A'))
+    a_kpi_html += kpi_card("&#128203;", "總案件數", f"{a_kpi.get('total_cases', 0):,}")
+    a_kpi_html += kpi_card("&#128128;", "死亡人數", f"{a_kpi.get('total_deaths', 0):,}")
+    a_kpi_html += kpi_card("&#129657;", "受傷人數", f"{a_kpi.get('total_injuries', 0):,}")
+    a_kpi_html += kpi_card("&#128200;", "年度變化", a_change_str, color=a_change_color)
+    a_kpi_html += kpi_card("&#128205;", "年均案件數", f"{a_kpi.get('avg_cases', 0):.0f}")
+    a_kpi_html += kpi_card("&#128681;", "最高風險行政區", a_kpi.get('top_district', 'N/A'))
+    a_kpi_html += kpi_card("&#9888;", "主要事故類型", a_kpi.get('top_type', 'N/A'))
     a_kpi_html += '</div>'
 
-    # Insights
-    def build_insights_html(insights, section):
-        zh_items = "".join([f"<li>{item}</li>" for item in insights.get("zh", [])])
-        en_items = "".join([f"<li>{item}</li>" for item in insights.get("en", [])])
-        return f'''<div class="insights-card">
-  <h3 data-zh="專業分析摘要" data-en="Professional Analysis"></h3>
-  <ul class="lang-zh">{zh_items}</ul>
-  <ul class="lang-en">{en_items}</ul>
-</div>'''
+    v_insights_html = '<div class="insights-card"><h3>專業分析摘要</h3><ul>' + "".join([f"<li>{item}</li>" for item in v_insights]) + '</ul></div>' if v_insights else ''
+    v_recs_html = '<div class="recommendations-card"><h3>決策建議</h3><ul>' + "".join([f"<li>{item}</li>" for item in v_recommendations]) + '</ul></div>' if v_recommendations else ''
+    a_insights_html = '<div class="insights-card"><h3>專業分析摘要</h3><ul>' + "".join([f"<li>{item}</li>" for item in a_insights]) + '</ul></div>' if a_insights else ''
+    a_recs_html = '<div class="recommendations-card"><h3>決策建議</h3><ul>' + "".join([f"<li>{item}</li>" for item in a_recommendations]) + '</ul></div>' if a_recommendations else ''
 
-    def build_recommendations_html(recs, section):
-        zh_items = "".join([f"<li>{item}</li>" for item in recs.get("zh", [])])
-        en_items = "".join([f"<li>{item}</li>" for item in recs.get("en", [])])
-        return f'''<div class="recommendations-card">
-  <h3 data-zh="決策建議" data-en="Policy Recommendations"></h3>
-  <ul class="lang-zh">{zh_items}</ul>
-  <ul class="lang-en">{en_items}</ul>
-</div>'''
-
-    v_insights_html = build_insights_html(v_insights, "violation")
-    v_recs_html = build_recommendations_html(v_recommendations, "violation")
-    a_insights_html = build_insights_html(a_insights, "accident")
-    a_recs_html = build_recommendations_html(a_recommendations, "accident")
-
-    # CSS
     css = """:root{--primary:#1a5276;--secondary:#2874a6;--accent:#e74c3c;--bg:#f8f9fa;--card-bg:#ffffff;--text:#2c3e50;--border:#dee2e6;--success:#27ae60;--warning:#f39c12}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:"Segoe UI","Microsoft JhengHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.6}
 header{background:linear-gradient(135deg,var(--primary),var(--secondary));color:white;padding:2rem 1rem;text-align:center;position:relative}
 header h1{font-size:1.8rem;margin-bottom:0.5rem}
 header p{opacity:0.9;font-size:0.95rem}
-.lang-toggle{position:absolute;top:1rem;right:1rem;background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.4);color:white;padding:0.4rem 1rem;border-radius:20px;cursor:pointer;font-size:0.9rem;transition:all 0.3s}
-.lang-toggle:hover{background:rgba(255,255,255,0.35)}
 nav{background:#1a5276;padding:0.5rem 1rem;text-align:center;position:sticky;top:0;z-index:100;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
 nav a{color:white;text-decoration:none;margin:0 1rem;font-size:0.95rem;padding:0.3rem 0.8rem;border-radius:4px;display:inline-block}
 nav a:hover{background:rgba(255,255,255,0.2)}
@@ -1202,7 +1100,6 @@ main{max-width:1400px;margin:0 auto;padding:1.5rem}
 .section-title{font-size:1.4rem;color:var(--primary);margin:2rem 0 1rem;padding-bottom:0.5rem;border-bottom:3px solid var(--secondary);display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
 .year-selector{background:white;border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.8rem;font-size:1rem;color:var(--text);cursor:pointer}
 .sample-banner{background:#fff3cd;border:1px solid #ffeaa7;border-radius:8px;padding:1rem;margin:1rem 0;text-align:center;color:#856404}
-/* KPI Cards */
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;margin-bottom:1.5rem}
 .kpi-card{background:var(--card-bg);border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);padding:1.2rem;text-align:center;border-top:4px solid var(--primary);transition:transform 0.2s}
 .kpi-card:hover{transform:translateY(-3px);box-shadow:0 4px 16px rgba(0,0,0,0.12)}
@@ -1210,14 +1107,12 @@ main{max-width:1400px;margin:0 auto;padding:1.5rem}
 .kpi-label{font-size:0.85rem;color:#888;margin-bottom:0.3rem;text-transform:uppercase;letter-spacing:0.5px}
 .kpi-value{font-size:1.6rem;font-weight:bold;color:var(--primary)}
 .kpi-unit{font-size:0.9rem;color:#888;margin-left:0.2rem}
-/* Charts */
 .chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(500px,1fr));gap:1.5rem;margin-bottom:1.5rem}
 .chart-card,.map-card,.insights-card,.recommendations-card{background:var(--card-bg);border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);padding:1rem;transition:transform 0.2s}
 .chart-card:hover,.map-card:hover{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.12)}
 .chart-card h3,.map-card h3{font-size:1rem;color:var(--primary);margin-bottom:0.75rem;padding-left:0.5rem;border-left:4px solid var(--accent)}
 .map-card{margin-bottom:1.5rem}
 iframe{border-radius:8px;width:100%;border:none}
-/* Insights & Recommendations */
 .insights-card{border-left:4px solid var(--secondary);margin-bottom:1rem}
 .insights-card h3{color:var(--primary);margin-bottom:0.75rem;font-size:1.1rem}
 .insights-card ul{margin-left:1.5rem;color:#444}
@@ -1226,120 +1121,35 @@ iframe{border-radius:8px;width:100%;border:none}
 .recommendations-card h3{color:var(--success);margin-bottom:0.75rem;font-size:1.1rem}
 .recommendations-card ul{margin-left:1.5rem;color:#444}
 .recommendations-card li{margin-bottom:0.5rem}
-.no-data{padding:2rem;color:#888;text-align:center}
 footer{text-align:center;padding:1.5rem;color:#888;font-size:0.8rem;border-top:1px solid var(--border)}
 footer a{color:var(--secondary);text-decoration:none}
-/* Language switching */
-.lang-en{display:none}
-body.en .lang-zh{display:none}
-body.en .lang-en{display:block}
-body.en [data-en]::before{content:attr(data-en)}
-body.zh [data-zh]::before{content:attr(data-zh)}
-/* Mobile */
 @media(max-width:600px){.chart-grid{grid-template-columns:1fr}header h1{font-size:1.3rem}nav a{margin:0 0.3rem;font-size:0.85rem}.section-title{font-size:1.1rem}.kpi-grid{grid-template-columns:repeat(2,1fr)}}"""
-
-    # JavaScript for language switching and year switching
-    js = """
-(function() {
-  var currentLang = localStorage.getItem('reportLang') || 'zh';
-  document.body.classList.add(currentLang);
-
-  function toggleLang() {
-    currentLang = currentLang === 'zh' ? 'en' : 'zh';
-    document.body.classList.remove('zh', 'en');
-    document.body.classList.add(currentLang);
-    localStorage.setItem('reportLang', currentLang);
-    updateTexts();
-    updateSelectOptions();
-  }
-
-  function updateTexts() {
-    document.querySelectorAll('[data-zh][data-en]').forEach(function(el) {
-      var text = currentLang === 'zh' ? el.getAttribute('data-zh') : el.getAttribute('data-en');
-      if (el.tagName === 'OPTION') {
-        el.textContent = text;
-      } else if (!el.querySelector('*')) {
-        el.textContent = text;
-      }
-    });
-  }
-
-  function updateSelectOptions() {
-    document.querySelectorAll('option[data-zh][data-en]').forEach(function(opt) {
-      opt.textContent = currentLang === 'zh' ? opt.getAttribute('data-zh') : opt.getAttribute('data-en');
-    });
-  }
-
-  function switchCharts(section, year) {
-    var allContainer = document.getElementById(section + '_charts_all');
-    if (allContainer) allContainer.style.display = 'none';
-    document.querySelectorAll('[id^="' + section + '_charts_"]').forEach(function(el) {
-      if (el.id !== section + '_charts_all') el.style.display = 'none';
-    });
-    if (year === 'all') {
-      if (allContainer) allContainer.style.display = 'grid';
-    } else {
-      var target = document.getElementById(section + '_charts_' + year);
-      if (target) target.style.display = 'grid';
-    }
-  }
-
-  function switchMap(section, year) {
-    var allFrame = document.getElementById(section + '_map_all');
-    if (allFrame) allFrame.style.display = 'none';
-    document.querySelectorAll('[id^="' + section + '_map_"]').forEach(function(el) {
-      if (el.id !== section + '_map_all') el.style.display = 'none';
-    });
-    if (year === 'all') {
-      if (allFrame) allFrame.style.display = 'block';
-    } else {
-      var target = document.getElementById(section + '_map_' + year);
-      if (target) target.style.display = 'block';
-    }
-  }
-
-  window.switchYear = function(section, year) {
-    switchCharts(section, year);
-    switchMap(section, year);
-  };
-
-  window.toggleLang = toggleLang;
-
-  document.addEventListener('DOMContentLoaded', function() {
-    updateTexts();
-    updateSelectOptions();
-  });
-})();
-"""
 
     html = f'''<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title data-zh="桃園市交通裁罰及傷亡資訊報告" data-en="Taoyuan Traffic Violation & Accident Report"></title>
+<title>桃園市交通裁罰及傷亡資訊報告</title>
 <style>{css}</style>
-<script>{js}</script>
+<script>{chart_switch_js}</script>
 </head>
-<body class="zh">
+<body>
 <header>
-  <button class="lang-toggle" onclick="toggleLang()" data-zh="English" data-en="繁體中文"></button>
-  <h1 data-zh="桃園市交通裁罰及傷亡資訊報告" data-en="Taoyuan Traffic Violation & Accident Report"></h1>
-  <p data-zh="資料來源：桃園資料開放平台 | 透過 GitHub Actions 自動更新" data-en="Data Source: Taoyuan Open Data Platform | Auto-updated via GitHub Actions"></p>
+  <h1>桃園市交通裁罰及傷亡資訊報告</h1>
+  <p>資料來源：桃園資料開放平台 | 透過 GitHub Actions 自動更新</p>
 </header>
 <nav>
-  <a href="#violations" data-zh="交通違規裁罰" data-en="Traffic Violations"></a>
-  <a href="#accidents" data-zh="交通事故分析" data-en="Accident Analysis"></a>
+  <a href="#violations">交通違規裁罰</a>
+  <a href="#accidents">交通事故分析</a>
 </nav>
-<div class="update-time">
-  <span data-zh="報告生成時間" data-en="Report Generated"></span>: {now}
-</div>
+<div class="update-time">報告生成時間：{now}</div>
 {sample_banner}
 <main>
 
 <section id="violations">
 <div class="section-title">
-  <span data-zh="交通違規裁罰分析" data-en="Traffic Violation Analysis"></span>
+  交通違規裁罰分析
   <select class="year-selector" onchange="switchYear('violation', this.value)">
 {year_options}  </select>
 </div>
@@ -1348,15 +1158,15 @@ body.zh [data-zh]::before{content:attr(data-zh)}
 {v_recs_html}
 {v_charts_html}
 <div class="map-card">
-  <h3 data-zh="違規裁罰點位分布地圖" data-en="Violation Location Map"></h3>
+  <h3>違規裁罰點位分布地圖</h3>
   {v_maps_html}
-  <p style="font-size:0.8rem;color:#888;margin-top:0.5rem;" data-zh="免費底圖：OpenStreetMap、CartoDB Positron/Dark、Esri 衛星影像。使用右上角圖層控制切換。綜合地圖可透過左側圖層單切換年度。" data-en="Free basemaps: OpenStreetMap, CartoDB Positron/Dark, Esri Satellite. Use the top-right layer control to switch. Combined map supports year switching via the left layer menu."></p>
+  <p style="font-size:0.8rem;color:#888;margin-top:0.5rem;">免費底圖：OpenStreetMap、CartoDB Positron/Dark、Esri 衛星影像。使用右上角圖層控制切換。綜合地圖可透過左側圖層選單切換年度。</p>
 </div>
 </section>
 
 <section id="accidents">
 <div class="section-title">
-  <span data-zh="交通事故分析" data-en="Traffic Accident Analysis"></span>
+  交通事故分析
   <select class="year-selector" onchange="switchYear('accident', this.value)">
 {year_options}  </select>
 </div>
@@ -1365,16 +1175,16 @@ body.zh [data-zh]::before{content:attr(data-zh)}
 {a_recs_html}
 {a_charts_html}
 <div class="map-card">
-  <h3 data-zh="交通事故熱點分布地圖" data-en="Accident Hotspot Map"></h3>
+  <h3>交通事故熱點分布地圖</h3>
   {a_maps_html}
-  <p style="font-size:0.8rem;color:#888;margin-top:0.5rem;" data-zh="免費底圖：OpenStreetMap、CartoDB Positron/Dark、Esri 衛星影像。使用右上角衛星影像。使用右上角圖層控制切換。綜合地圖可透過左側圖層選單切換年度。" data-en="Free basemaps: OpenStreetMap, CartoDB Positron/Dark, Esri Satellite. Use the top-right layer control to switch. Combined map supports year switching via the left layer menu."></p>
+  <p style="font-size:0.8rem;color:#888;margin-top:0.5rem;">免費底圖：OpenStreetMap、CartoDB Positron/Dark、Esri 衛星影像。使用右上角衛星影像。使用右上角圖層控制切換。綜合地圖可透過左側圖層選單切換年度。</p>
 </div>
 </section>
 
 </main>
 <footer>
-  <p><span data-zh="資料來源" data-en="Data Source"></span>: <a href="https://opendata.tycg.gov.tw" target="_blank">Taoyuan Open Data Platform</a></p>
-  <p data-zh="本報告由 GitHub Actions 自動生成，僅供參考" data-en="Auto-generated by GitHub Actions. For reference only."></p>
+  <p>資料來源：<a href="https://opendata.tycg.gov.tw" target="_blank">桃園資料開放平台</a></p>
+  <p>本報告由 GitHub Actions 自動生成，僅供參考</p>
 </footer>
 </body>
 </html>'''
@@ -1383,29 +1193,26 @@ body.zh [data-zh]::before{content:attr(data-zh)}
     with open("docs/index.html", "w", encoding="utf-8") as f:
         f.write(html)
     size = os.path.getsize("docs/index.html")
-    print(f"\n[Done] docs/index.html ({size} bytes)")
+    print(f"\n[完成] docs/index.html ({size} bytes)")
     return "docs/index.html"
 
 
-# ========== Main Program ==========
-
 def main():
     print("=" * 60)
-    print("Taoyuan Traffic Report Generator v5.0")
+    print("桃園市交通裁罰及傷亡資訊報告生成器 v5.1")
     print("=" * 60)
 
-    v_data = {"year_figs": {}, "all_figs": [], "year_maps": {}, "all_map": None, "years": [], "is_sample": False, "kpi": {}, "insights": {"zh": [], "en": []}, "recommendations": {"zh": [], "en": []}}
-    a_data = {"year_figs": {}, "all_figs": [], "year_maps": {}, "all_map": None, "years": [], "is_sample": False, "kpi": {}, "insights": {"zh": [], "en": []}, "recommendations": {"zh": [], "en": []}}
+    v_data = {"year_figs": {}, "all_figs": [], "year_maps": {}, "all_map": None, "years": [], "is_sample": False, "kpi": {}, "insights": [], "recommendations": []}
+    a_data = {"year_figs": {}, "all_figs": [], "year_maps": {}, "all_map": None, "years": [], "is_sample": False, "kpi": {}, "insights": [], "recommendations": []}
 
-    # Violation analysis
     try:
         va = analyze_violations()
         if va:
             v_data["years"] = va["years"]
             v_data["is_sample"] = va.get("is_sample", False)
             v_data["kpi"] = va.get("kpi", {})
-            v_data["insights"] = va.get("insights", {"zh": [], "en": []})
-            v_data["recommendations"] = va.get("recommendations", {"zh": [], "en": []})
+            v_data["insights"] = va.get("insights", [])
+            v_data["recommendations"] = va.get("recommendations", [])
             v_year_figs, v_all_figs = make_violation_charts(va)
             v_year_maps, v_all_map = make_violation_maps(va)
             v_data["year_figs"] = v_year_figs
@@ -1413,18 +1220,17 @@ def main():
             v_data["year_maps"] = v_year_maps
             v_data["all_map"] = v_all_map
     except Exception as e:
-        print(f"\n[Error] Violation analysis: {e}")
+        print(f"\n[錯誤] 違規分析: {e}")
         traceback.print_exc()
 
-    # Accident analysis
     try:
         aa = analyze_accidents()
         if aa:
             a_data["years"] = aa["years"]
             a_data["is_sample"] = aa.get("is_sample", False)
             a_data["kpi"] = aa.get("kpi", {})
-            a_data["insights"] = aa.get("insights", {"zh": [], "en": []})
-            a_data["recommendations"] = aa.get("recommendations", {"zh": [], "en": []})
+            a_data["insights"] = aa.get("insights", [])
+            a_data["recommendations"] = aa.get("recommendations", [])
             a_year_figs, a_all_figs = make_accident_charts(aa)
             a_year_maps, a_all_map = make_accident_maps(aa)
             a_data["year_figs"] = a_year_figs
@@ -1432,21 +1238,20 @@ def main():
             a_data["year_maps"] = a_year_maps
             a_data["all_map"] = a_all_map
     except Exception as e:
-        print(f"\n[Error] Accident analysis: {e}")
+        print(f"\n[錯誤] 事故分析: {e}")
         traceback.print_exc()
 
-    # Generate index
     print("\n" + "-" * 60)
-    print("Generating index...")
+    print("生成整合主報告頁面...")
     print("-" * 60)
     try:
         generate_index(v_data, a_data)
     except Exception as e:
-        print(f"[Error] Index generation: {e}")
+        print(f"[錯誤] 主報告頁面: {e}")
         traceback.print_exc()
 
     print("\n" + "=" * 60)
-    print("Done. Output: docs/index.html")
+    print("完成。輸出: docs/index.html")
     print("=" * 60)
     return 0
 
