@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>桃園市交通裁罰及傷亡資訊報告</title>
+<style>
+:root { --primary: #1a5276; --secondary: #2874a6; --accent: #e74c3c; --bg: #f8f9fa; --card-bg: #ffffff; --text: #2c3e50; --border: #dee2e6; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+header { background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; padding: 2rem 1rem; text-align: center; position: relative; }
+header h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+header p { opacity: 0.9; font-size: 0.95rem; }
+nav { background: #1a5276; padding: 0.5rem 1rem; text-align: center; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+nav a { color: white; text-decoration: none; margin: 0 1rem; font-size: 0.95rem; padding: 0.3rem 0.8rem; border-radius: 4px; transition: background 0.2s; display: inline-block; }
+nav a:hover { background: rgba(255,255,255,0.2); }
+.update-time { text-align: center; padding: 0.5rem; background: #e8f4f8; font-size: 0.85rem; color: #555; }
+main { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
+.section-title { font-size: 1.4rem; color: var(--primary); margin: 2rem 0 1rem; padding-bottom: 0.5rem; border-bottom: 3px solid var(--secondary); }
+.chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }
+.chart-card, .map-card { background: var(--card-bg); border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 1rem; transition: transform 0.2s; }
+.chart-card:hover, .map-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+.chart-card h3, .map-card h3 { font-size: 1rem; color: var(--primary); margin-bottom: 0.75rem; padding-left: 0.5rem; border-left: 4px solid var(--accent); }
+.map-card { margin-bottom: 1.5rem; }
+iframe { border-radius: 8px; width: 100%; border: none; }
+footer { text-align: center; padding: 1.5rem; color: #888; font-size: 0.8rem; border-top: 1px solid var(--border); }
+footer a { color: var(--secondary); text-decoration: none; }
+@media (max-width: 600px) { .chart-grid { grid-template-columns: 1fr; } header h1 { font-size: 1.3rem; } nav a { margin: 0 0.3rem; font-size: 0.85rem; } }
+</style>
+</head>
+<body>
+<header>
+<h1>桃園市交通裁罰及傷亡資訊報告</h1>
+<p>資料來源：桃園資料開放平台 | 透過 GitHub Actions 自動更新</p>
+</header>
+<nav>
+<a href="#violations">交通違規裁罰</a>
+<a href="#accidents">交通事故分析</a>
+</nav>
+<div class="update-time">報告生成時間：請執行 generate_report.py 生成</div>
+<main>
+
+<h2 id="violations" class="section-title">交通違規裁罰分析</h2>
+<div class="chart-grid">
+<div class="chart-card"><h3>Yearly Trend</h3><iframe src="violation_yearly_trend.html" width="100%" height="450"></iframe></div>
+<div class="chart-card"><h3>Top Laws</h3><iframe src="violation_top_laws.html" width="100%" height="450"></iframe></div>
+<div class="chart-card"><h3>Top Facts</h3><iframe src="violation_top_facts.html" width="100%" height="450"></iframe></div>
+<div class="chart-card"><h3>Area Distribution</h3><iframe src="violation_area_distribution.html" width="100%" height="450"></iframe></div>
+<div class="chart-card"><h3>Heatmap</h3><iframe src="violation_heatmap.html" width="100%" height="450"></iframe></div>
+</div>
+<div class="map-card"><h3>違規裁罰點位分布地圖</h3><iframe src="violation_map.html" width="100%" height="600"></iframe></div>
+
+<h2 id="accidents" class="section-title">交通事故分析</h2>
+<div class="chart-grid">
+<div class="chart-card"><h3>Yearly Trend</h3><iframe src="accident_yearly_trend.html" width="100%" height="450"></iframe></div>
+<div class="chart-card"><h3>Type Distribution</h3><iframe src="accident_type_distribution.html" width="100%" height="450"></iframe></div>
+<div class="chart-card"><h3>Area Distribution</h3><iframe src="accident_area_distribution.html" width="100%" height="450"></iframe></div>
+<div class="chart-card"><h3>Place Distribution</h3><iframe src="accident_place_distribution.html" width="100%" height="450"></iframe></div>
+<div class="chart-card"><h3>Vehicle Distribution</h3><iframe src="accident_vehicle_distribution.html" width="100%" height="450"></iframe></div>
+<div class="chart-card"><h3>Casualty Trend</h3><iframe src="accident_casualty_trend.html" width="100%" height="450"></iframe></div>
+</div>
+<div class="map-card"><h3>交通事故熱點分布地圖</h3><iframe src="accident_map.html" width="100%" height="600"></iframe></div>
+
+</main>
+<footer>
+<p>資料來源：<a href="https://opendata.tycg.gov.tw" target="_blank">桃園資料開放平台</a></p>
+<p>本報告由 GitHub Actions 自動生成，僅供參考</p>
+</footer>
+</body>
+</html>
