@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-桃園市交通裁罰及傷亡資訊報告生成器
+桃園市交通裁罰及傷亡資訊報告生成器 v2.1
 直接從 API 介接資料，不儲存中間檔案
+API 失敗時自動使用範例資料產生報告
 """
 
 import requests
@@ -13,13 +14,27 @@ import folium
 from folium.plugins import MarkerCluster
 from datetime import datetime
 import os
+import sys
 import traceback
+import random
 
 os.makedirs("docs", exist_ok=True)
 
-BASE_URL = "https://data.tycg.gov.tw/api/v1/rest/datastore"
+API_TIMEOUT = 60
+API_RETRY = 3
+
+API_BASES = [
+    "https://opendata.tycg.gov.tw/api/v1/rest",
+    "https://data.tycg.gov.tw/api/v1/rest",
+]
+
 VIOLATION_DATASET_ID = "08b2987e-01e5-458d-a8c1-cd4b540a0105"
-ACCIDENT_DATASET_ID = "24bf2215-8c80-439e-b553-59ccfc82ca78"
+
+ACCIDENT_DATASET_IDS = [
+    "08d560b5-7cf2-4909-8a02-da39c74d8b09",
+    "db5055c9-9f2e-4546-8e58-e413dfbbcdeb",
+    "f4c49615-1120-4fd5-8ada-e9a77b1c784e",
+]
 
 TAOYUAN_AREAS = {
     "桃園區": [24.989, 121.313], "中壢區": [24.965, 121.221],
@@ -31,102 +46,207 @@ TAOYUAN_AREAS = {
     "復興區": [24.817, 121.375],
 }
 
+VIOLATION_LAWS = [
+    "未依規定使用燈光", "未保持行車安全距離", "變換車道未依規定使用方向燈",
+    "超速行駛", "闖紅燈", "未禮讓行人", "違規停車", "未依標線行駛",
+    "未繫安全帶", "使用手持行動電話", "逆向行駛", "未依號誌行駛",
+    "違規迴車", "未依規定車道行駛", "違規變換車道",
+]
 
-def api_get(url, params=None, timeout=120):
-    try:
-        resp = requests.get(url, params=params, timeout=timeout)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        print(f"  [警告] API 請求失敗: {url} | 錯誤: {e}")
-        return None
+VIOLATION_FACTS = [
+    "行駛中未保持安全距離", "變換車道未打方向燈", "闖紅燈右轉",
+    "行駛中超速", "行人穿越道未禮讓行人", "紅燈越線", "違規停車於路口",
+    "行駛中使用手機", "未依兩段式左轉", "逆向行駛於單行道",
+    "未依線行駛", "違規迴車於路口", "未繫安全帶行駛",
+    "違規變換車道", "未依號誌行駛",
+]
 
-
-def get_resources(dataset_id):
-    url = f"https://data.tycg.gov.tw/api/v1/rest/dataset/{dataset_id}"
-    data = api_get(url, timeout=60)
-    if not data or "result" not in data:
-        return []
-    result = data["result"]
-    resources = result.get("resources") or result.get("resource") or []
-    out = []
-    for r in resources:
-        rid = r.get("id", "")
-        rname = r.get("name") or r.get("resource_name", "")
-        if rid:
-            out.append((rid, rname))
-    return out
+ACCIDENT_TYPES = [
+    "路口交岔撞", "同向擦撞", "對向撞", "追撞", "倒車撞",
+    "側撞", "衝出路外", "行人事故", "自行車事故", "其他",
+]
 
 
-def fetch_records(resource_id, limit=100000):
-    url = f"{BASE_URL}/{resource_id}"
-    params = {"format": "json", "limit": limit}
-    data = api_get(url, params=params)
-    if not data:
-        return []
-    result = data.get("result", {})
-    return result.get("records") or result.get("results") or []
+def api_get(url, params=None, timeout=API_TIMEOUT):
+    for attempt in range(1, API_RETRY + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            print(f"    [API 錯誤] 嘗試 {attempt}/{API_RETRY}: {url}")
+            print(f"             {e}")
+            if attempt == API_RETRY:
+                return None
+    return None
 
 
-def fetch_dataset_df(dataset_id, dataset_name=""):
-    resources = get_resources(dataset_id)
+def get_dataset_metadata(dataset_id):
+    for base in API_BASES:
+        url = f"{base}/dataset/{dataset_id}"
+        print(f"  嘗試介接資料集詮釋資料: {url}")
+        data = api_get(url, timeout=30)
+        if data:
+            print(f"  成功取得資料集詮釋資料")
+            result = data.get("result") or data
+            resources = []
+            raw_resources = result.get("resources") or result.get("resource") or []
+            if isinstance(raw_resources, list):
+                for r in raw_resources:
+                    rid = r.get("id") or r.get("resource_id") or r.get("_id")
+                    rname = r.get("name") or r.get("resource_name") or r.get("format", "")
+                    if rid:
+                        resources.append({"id": rid, "name": rname, "raw": r})
+            if not resources and "id" in result:
+                rid = result.get("id")
+                if rid and rid != dataset_id:
+                    resources.append({"id": rid, "name": result.get("name", ""), "raw": result})
+            print(f"  找到 {len(resources)} 個 resource")
+            for r in resources:
+                print(f"    - {r['name']} (ID: {r['id']})")
+            return resources
+    print(f"  [錯誤] 無法取得資料集 {dataset_id} 的詮釋資料")
+    return []
+
+
+def fetch_datastore(resource_id, limit=100000):
+    for base in API_BASES:
+        url = f"{base}/datastore/{resource_id}"
+        params = {"format": "json", "limit": limit}
+        print(f"    嘗試 Datastore: {url} (limit={limit})")
+        data = api_get(url, params=params, timeout=API_TIMEOUT)
+        if data:
+            result = data.get("result") or data
+            records = result.get("records") or result.get("results") or []
+            if records:
+                print(f"    成功取得 {len(records)} 筆資料")
+                return records
+            if isinstance(data, list):
+                print(f"    成功取得 {len(data)} 筆資料 (list 格式)")
+                return data
+            print(f"    回傳結構: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+    print(f"    [錯誤] 無法取得 resource {resource_id} 的資料")
+    return []
+
+
+def fetch_dataset_all_records(dataset_id, dataset_name=""):
+    print(f"\n[{dataset_name}] Dataset ID: {dataset_id}")
+    resources = get_dataset_metadata(dataset_id)
     all_records = []
-    print(f"[{dataset_name}] 發現 {len(resources)} 個 resource")
-    for rid, rname in resources:
-        print(f"  介接: {rname} (ID: {rid})")
-        records = fetch_records(rid)
+
+    if resources:
+        for r in resources:
+            rid = r["id"]
+            rname = r["name"]
+            records = fetch_datastore(rid, limit=100000)
+            if records:
+                for rec in records:
+                    rec["_source_resource"] = rname
+                all_records.extend(records)
+    else:
+        print(f"  未找到 resources，嘗試直接用 dataset_id 存取 datastore")
+        records = fetch_datastore(dataset_id, limit=100000)
         if records:
-            print(f"    取得 {len(records)} 筆")
-            for r in records:
-                r["_source_resource"] = rname
             all_records.extend(records)
-        else:
-            print(f"    無資料")
-    if not all_records:
-        print(f"  fallback: 嘗試直接用 dataset_id 介接")
-        records = fetch_records(dataset_id)
-        if records:
-            print(f"    取得 {len(records)} 筆")
-            all_records.extend(records)
+
     df = pd.DataFrame(all_records)
-    print(f"  DataFrame 形狀: {df.shape}")
+    print(f"  DataFrame: {df.shape[0]} 列 x {df.shape[1]} 欄")
+    if not df.empty:
+        print(f"  欄位: {list(df.columns)}")
     return df
 
 
-# ========== 違規裁罰分析 ==========
+def generate_sample_violation_data(n=5000):
+    print(f"\n[Fallback] 產生範例違規資料 {n} 筆")
+    areas = list(TAOYUAN_AREAS.keys())
+    years = list(range(109, 115))
+    data = []
+    for _ in range(n):
+        area = random.choice(areas)
+        lat, lon = TAOYUAN_AREAS[area]
+        lat += random.uniform(-0.05, 0.05)
+        lon += random.uniform(-0.05, 0.05)
+        data.append({
+            "year": random.choice(years),
+            "month": random.randint(1, 12),
+            "time": f"{random.randint(0, 23):02d}:{random.randint(0, 59):02d}",
+            "law": random.choice(VIOLATION_LAWS),
+            "fact": random.choice(VIOLATION_FACTS),
+            "CountyCode": "68",
+            "AreaName": area,
+            "AreaCode": "",
+            "Road": random.choice(["中山路", "中正路", "復興路", "文化路", "明德路", "信義路"]),
+            "latitude": round(lat, 6),
+            "longitude": round(lon, 6),
+        })
+    return pd.DataFrame(data)
+
+
+def generate_sample_accident_data(n=3000):
+    print(f"\n[Fallback] 產生範例事故資料 {n} 筆")
+    areas = list(TAOYUAN_AREAS.keys())
+    years = list(range(108, 115))
+    data = []
+    for _ in range(n):
+        area = random.choice(areas)
+        year = random.choice(years)
+        count = random.randint(1, 50)
+        deaths = random.randint(0, min(3, count // 10))
+        injuries = random.randint(0, count * 3)
+        data.append({
+            "發生年度": year,
+            "事故類別名稱": random.choice(ACCIDENT_TYPES),
+            "發生縣市名稱": "桃園市",
+            "發生市區鄉鎮名稱": area,
+            "當事者年齡": random.choice(["18-24", "25-39", "40-64", "65+"]),
+            "當事者使用車種_類別": random.choice(["小客車", "機車", "腳踏車", "大貨車", "行人"]),
+            "案件總數": count,
+            "死亡": deaths,
+            "受傷": injuries,
+        })
+    return pd.DataFrame(data)
+
+
+def find_column(df, candidates):
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
 
 def analyze_violations():
-    print("\n===== 交通違規裁罰資料 =====")
-    try:
-        df = fetch_dataset_df(VIOLATION_DATASET_ID, "交通違規舉發")
-    except Exception as e:
-        print(f"[錯誤] 取得違規資料失敗: {e}")
-        traceback.print_exc()
-        return None
+    print("\n" + "=" * 60)
+    print("【交通違規裁罰資料】")
+    print("=" * 60)
+
+    df = fetch_dataset_all_records(VIOLATION_DATASET_ID, "交通違規舉發")
+    is_sample = False
     if df.empty:
-        print("未取得違規資料")
-        return None
+        print("  [警告] API 未取得資料，改用範例資料")
+        df = generate_sample_violation_data(5000)
+        is_sample = True
 
-    year_col = next((c for c in df.columns if "year" in c.lower() or "年度" in c or c == "年"), None)
-    law_col = next((c for c in df.columns if "law" in c.lower() or "法條" in c), None)
-    fact_col = next((c for c in df.columns if "fact" in c.lower() or "違規事實" in c or "事實" in c), None)
-    area_col = next((c for c in df.columns if "area" in c.lower() or "行政區" in c or "區" in c), None)
-    lat_col = next((c for c in df.columns if "lat" in c.lower() or "緯度" in c), None)
-    lon_col = next((c for c in df.columns if "lon" in c.lower() or "經度" in c), None)
-    road_col = next((c for c in df.columns if "road" in c.lower() or "路段" in c or "路" in c), None)
+    year_col = find_column(df, ["year", "Year", "YEAR", "年度", "年"])
+    law_col = find_column(df, ["law", "Law", "LAW", "違反法條", "法條"])
+    fact_col = find_column(df, ["fact", "Fact", "FACT", "違規事", "事實", "違規事實內容"])
+    area_col = find_column(df, ["AreaName", "areaName", "area", "AREA", "行政區", "行政區名稱", "區"])
+    lat_col = find_column(df, ["latitude", "Latitude", "LATITUDE", "lat", "Lat", "緯度"])
+    lon_col = find_column(df, ["longitude", "Longitude", "LONGITUDE", "lon", "Lng", "經度"])
+    road_col = find_column(df, ["Road", "road", "ROAD", "路段", "路名", "路段路名"])
 
-    print(f"欄位: year={year_col}, law={law_col}, fact={fact_col}, area={area_col}, lat={lat_col}, lon={lon_col}")
+    print(f"  欄位對應: year={year_col}, law={law_col}, fact={fact_col}, area={area_col}, lat={lat_col}, lon={lon_col}")
 
-    year_counts = df[year_col].value_counts().sort_index() if year_col and year_col in df.columns else pd.Series(dtype=int)
-    law_counts = df[law_col].value_counts().head(20) if law_col and law_col in df.columns else pd.Series(dtype=int)
-    fact_counts = df[fact_col].value_counts().head(20) if fact_col and fact_col in df.columns else pd.Series(dtype=int)
-    area_counts = df[area_col].value_counts() if area_col and area_col in df.columns else pd.Series(dtype=int)
+    year_counts = df[year_col].value_counts().sort_index() if year_col else pd.Series(dtype=int)
+    law_counts = df[law_col].value_counts().head(20) if law_col else pd.Series(dtype=int)
+    fact_counts = df[fact_col].value_counts().head(20) if fact_col else pd.Series(dtype=int)
+    area_counts = df[area_col].value_counts() if area_col else pd.Series(dtype=int)
 
     return {
         "df": df, "year_col": year_col, "law_col": law_col, "fact_col": fact_col,
         "area_col": area_col, "lat_col": lat_col, "lon_col": lon_col, "road_col": road_col,
         "year_counts": year_counts, "law_counts": law_counts,
         "fact_counts": fact_counts, "area_counts": area_counts,
+        "is_sample": is_sample,
     }
 
 
@@ -135,50 +255,50 @@ def create_violation_charts(a):
         return []
     figs = []
     df = a["df"]
+    sample_note = " (範例資料)" if a.get("is_sample") else ""
 
-    try:
-        if len(a["year_counts"]) > 0:
-            fig = px.bar(x=a["year_counts"].index.astype(str), y=a["year_counts"].values,
-                         labels={"x": "年度", "y": "裁罰件數"}, title="各年度交通違規裁罰件數統計",
-                         color=a["year_counts"].values, color_continuous_scale="Reds")
+    def save_bar(d, title, xlabel, ylabel, filename, color_scale):
+        try:
+            if d is None or len(d) == 0:
+                return False
+            fig = px.bar(x=d.index.astype(str), y=d.values,
+                         labels={"x": xlabel, "y": ylabel}, title=f"{title}{sample_note}",
+                         color=d.values, color_continuous_scale=color_scale)
             fig.update_layout(template="plotly_white")
-            fig.write_html("docs/violation_yearly_trend.html", include_plotlyjs="cdn")
-            figs.append("violation_yearly_trend.html")
-    except Exception as e:
-        print(f"[警告] 違規年度趨勢圖生成失敗: {e}")
+            fig.write_html(f"docs/{filename}", include_plotlyjs="cdn")
+            figs.append(filename)
+            print(f"    已生成: {filename}")
+            return True
+        except Exception as e:
+            print(f"    [警告] 圖表生成失敗 {filename}: {e}")
+            return False
 
-    try:
-        if len(a["law_counts"]) > 0:
-            fig = px.bar(y=a["law_counts"].head(15).index[::-1], x=a["law_counts"].head(15).values[::-1],
-                         orientation="h", labels={"y": "違反法條", "x": "件數"}, title="主要違反法條 TOP 15",
-                         color=a["law_counts"].head(15).values[::-1], color_continuous_scale="Oranges")
+    def save_hbar(d, title, ylabel, xlabel, filename, color_scale, top=15):
+        try:
+            if d is None or len(d) == 0:
+                return False
+            d_top = d.head(top)
+            fig = px.bar(y=d_top.index[::-1], x=d_top.values[::-1],
+                         orientation="h", labels={"y": ylabel, "x": xlabel},
+                         title=f"{title}{sample_note}",
+                         color=d_top.values[::-1], color_continuous_scale=color_scale)
             fig.update_layout(template="plotly_white", height=600)
-            fig.write_html("docs/violation_top_laws.html", include_plotlyjs="cdn")
-            figs.append("violation_top_laws.html")
-    except Exception as e:
-        print(f"[警告] 違規法條圖生成失敗: {e}")
+            fig.write_html(f"docs/{filename}", include_plotlyjs="cdn")
+            figs.append(filename)
+            print(f"    已生成: {filename}")
+            return True
+        except Exception as e:
+            print(f"    [警告] 圖表生成失敗 {filename}: {e}")
+            return False
 
-    try:
-        if len(a["fact_counts"]) > 0:
-            fig = px.bar(y=a["fact_counts"].head(15).index[::-1], x=a["fact_counts"].head(15).values[::-1],
-                         orientation="h", labels={"y": "違規事實", "x": "件數"}, title="主要違規事實 TOP 15",
-                         color=a["fact_counts"].head(15).values[::-1], color_continuous_scale="Blues")
-            fig.update_layout(template="plotly_white", height=600)
-            fig.write_html("docs/violation_top_facts.html", include_plotlyjs="cdn")
-            figs.append("violation_top_facts.html")
-    except Exception as e:
-        print(f"[警告] 違事實圖生成失敗: {e}")
-
-    try:
-        if len(a["area_counts"]) > 0:
-            fig = px.bar(x=a["area_counts"].index, y=a["area_counts"].values,
-                         labels={"x": "行政區", "y": "裁罰件數"}, title="各行政區交通違規裁罰分布",
-                         color=a["area_counts"].values, color_continuous_scale="Purples")
-            fig.update_layout(template="plotly_white", xaxis_tickangle=-45)
-            fig.write_html("docs/violation_area_distribution.html", include_plotlyjs="cdn")
-            figs.append("violation_area_distribution.html")
-    except Exception as e:
-        print(f"[警告] 違規行政區圖生成失敗: {e}")
+    save_bar(a["year_counts"], "各年度交通違規裁罰件數統計", "年度", "裁罰件數",
+             "violation_yearly_trend.html", "Reds")
+    save_hbar(a["law_counts"], "主要違反法條 TOP 15", "違反法條", "件數",
+              "violation_top_laws.html", "Oranges")
+    save_hbar(a["fact_counts"], "主要違規事實 TOP 15", "違規事實", "件數",
+              "violation_top_facts.html", "Blues")
+    save_bar(a["area_counts"], "各行政區交通違規裁罰分布", "行政區", "裁罰件數",
+             "violation_area_distribution.html", "Purples")
 
     try:
         year_col = a["year_col"]
@@ -187,14 +307,16 @@ def create_violation_charts(a):
             pivot = df.groupby([year_col, area_col]).size().unstack(fill_value=0)
             if pivot.shape[0] > 0 and pivot.shape[1] > 0:
                 fig = px.imshow(pivot, labels=dict(x="行政區", y="年度", color="件數"),
-                               title="各年度行政區違規裁罰熱力圖", aspect="auto", color_continuous_scale="YlOrRd")
+                               title=f"各年度行政區違規裁罰熱力圖{sample_note}",
+                               aspect="auto", color_continuous_scale="YlOrRd")
                 fig.update_layout(template="plotly_white", height=500)
                 fig.write_html("docs/violation_heatmap.html", include_plotlyjs="cdn")
                 figs.append("violation_heatmap.html")
+                print(f"    已生成: violation_heatmap.html")
     except Exception as e:
-        print(f"[警告] 違規熱力圖生成失敗: {e}")
+        print(f"    [警告] 熱力圖生成失敗: {e}")
 
-    print(f"違規圖表: {len(figs)} 個")
+    print(f"  違規圖表共 {len(figs)} 個")
     return figs
 
 
@@ -209,9 +331,10 @@ def create_violation_map(a):
     fact_col = a["fact_col"]
     area_col = a["area_col"]
     road_col = a["road_col"]
+    sample_note = " (範例資料)" if a.get("is_sample") else ""
 
     if not lat_col or lat_col not in df.columns or not lon_col or lon_col not in df.columns:
-        print("缺少經緯度資料，略過違規地圖")
+        print("  [資訊] 少經緯度資料，略過違規地圖")
         return None
 
     try:
@@ -220,7 +343,7 @@ def create_violation_map(a):
         df_map[lon_col] = pd.to_numeric(df_map[lon_col], errors="coerce")
         df_map = df_map.dropna(subset=[lat_col, lon_col])
         if len(df_map) == 0:
-            print("無有效座標")
+            print("  [資訊] 無有效座標資料")
             return None
 
         center_lat = df_map[lat_col].median()
@@ -228,11 +351,12 @@ def create_violation_map(a):
         m = folium.Map(location=[center_lat, center_lon], zoom_start=11, tiles="CartoDB positron")
 
         if year_col and year_col in df_map.columns:
-            for year in sorted(df_map[year_col].dropna().unique()):
+            years = sorted(df_map[year_col].dropna().unique())
+            for year in years:
                 year_df = df_map[df_map[year_col] == year]
                 if len(year_df) == 0:
                     continue
-                fg = folium.FeatureGroup(name=f"{year}年違規裁罰點位")
+                fg = folium.FeatureGroup(name=f"{year}年違規裁罰點位{sample_note}")
                 mc = MarkerCluster().add_to(fg)
                 for _, row in year_df.iterrows():
                     popup = f"<b>年度:</b> {row.get(year_col, 'N/A')}<br>"
@@ -244,9 +368,11 @@ def create_violation_map(a):
                         popup += f"<b>法條:</b> {str(row.get(law_col, 'N/A'))[:50]}<br>"
                     if fact_col:
                         popup += f"<b>事實:</b> {str(row.get(fact_col, 'N/A'))[:50]}"
-                    folium.CircleMarker(location=[row[lat_col], row[lon_col]], radius=3,
-                                        popup=folium.Popup(popup, max_width=300),
-                                        color="red", fill=True, fill_opacity=0.6).add_to(mc)
+                    folium.CircleMarker(
+                        location=[row[lat_col], row[lon_col]], radius=3,
+                        popup=folium.Popup(popup, max_width=300),
+                        color="red", fill=True, fill_opacity=0.6
+                    ).add_to(mc)
                 fg.add_to(m)
         else:
             mc = MarkerCluster().add_to(m)
@@ -258,51 +384,57 @@ def create_violation_map(a):
                     popup += f"<b>路段:</b> {row.get(road_col, 'N/A')}<br>"
                 if law_col:
                     popup += f"<b>法條:</b> {str(row.get(law_col, 'N/A'))[:50]}"
-                folium.CircleMarker(location=[row[lat_col], row[lon_col]], radius=3,
-                                    popup=folium.Popup(popup, max_width=300),
-                                    color="red", fill=True, fill_opacity=0.6).add_to(mc)
+                folium.CircleMarker(
+                    location=[row[lat_col], row[lon_col]], radius=3,
+                    popup=folium.Popup(popup, max_width=300),
+                    color="red", fill=True, fill_opacity=0.6
+                ).add_to(mc)
 
         folium.LayerControl().add_to(m)
         m.save("docs/violation_map.html")
-        print("已生成違規裁罰分布地圖")
+        print(f"  已生成違規裁罰分布地圖{sample_note}")
         return "violation_map.html"
     except Exception as e:
-        print(f"[警告] 違規地圖生成失敗: {e}")
+        print(f"  [警告] 違規地圖生成失敗: {e}")
         traceback.print_exc()
         return None
 
-
-# ========== 交通事故分析 ==========
 
 def analyze_accidents():
-    print("\n===== 交通事故熱點資料 =====")
-    try:
-        df = fetch_dataset_df(ACCIDENT_DATASET_ID, "交通事故熱點")
-    except Exception as e:
-        print(f"[錯誤] 取得事故資料失敗: {e}")
-        traceback.print_exc()
-        return None
+    print("\n" + "=" * 60)
+    print("【交通事故資】")
+    print("=" * 60)
+
+    df = pd.DataFrame()
+    used_dataset_id = None
+    for ds_id in ACCIDENT_DATASET_IDS:
+        df = fetch_dataset_all_records(ds_id, "交通事故")
+        if not df.empty:
+            used_dataset_id = ds_id
+            break
+
+    is_sample = False
     if df.empty:
-        print("未取得事故資料")
-        return None
+        print("  [警告] 所有事故資料集 API 均未取得資料，改用範例資料")
+        df = generate_sample_accident_data(3000)
+        is_sample = True
 
-    year_col = next((c for c in df.columns if "year" in c.lower() or "年度" in c or c == "年度"), None)
-    type_col = next((c for c in df.columns if "類別" in c or "type" in c.lower() or "事故" in c), None)
-    area_col = next((c for c in df.columns if "地區" in c or "area" in c.lower() or "區" in c), None)
-    place_col = next((c for c in df.columns if "場所" in c or "place" in c.lower()), None)
-    vehicle_col = next((c for c in df.columns if "運具" in c or "vehicle" in c.lower() or "車" in c), None)
-    count_col = next((c for c in df.columns if "案件總數" in c or "count" in c.lower() or "總數" in c), None)
-    death_col = next((c for c in df.columns if "死亡" in c or "death" in c.lower()), None)
-    injury_col = next((c for c in df.columns if "受傷" in c or "injury" in c.lower()), None)
+    print(f"  使資料集: {used_dataset_id or '範例資料'}")
 
-    print(f"欄位: year={year_col}, type={type_col}, area={area_col}, count={count_col}, death={death_col}, injury={injury_col}")
+    year_col = find_column(df, ["year", "Year", "YEAR", "年度", "年", "發生年度"])
+    type_col = find_column(df, ["type", "Type", "TYPE", "事故類別", "事故類別名稱", "類別"])
+    area_col = find_column(df, ["area", "Area", "AREA", "發生市區鄉鎮名稱", "行政區", "區"])
+    place_col = find_column(df, ["place", "Place", "場所", "事故位置", "位置"])
+    vehicle_col = find_column(df, ["vehicle", "Vehicle", "車種", "當事者使用車種_大類別", "運具"])
+    count_col = find_column(df, ["count", "Count", "案件總數", "總數", "件數"])
+    death_col = find_column(df, ["death", "Death", "死亡", "死亡人數"])
+    injury_col = find_column(df, ["injury", "Injury", "受傷", "受傷人數"])
 
-    if count_col and count_col in df.columns:
-        df[count_col] = pd.to_numeric(df[count_col], errors="coerce").fillna(0)
-    if death_col and death_col in df.columns:
-        df[death_col] = pd.to_numeric(df[death_col], errors="coerce").fillna(0)
-    if injury_col and injury_col in df.columns:
-        df[injury_col] = pd.to_numeric(df[injury_col], errors="coerce").fillna(0)
+    print(f"  欄位對應: year={year_col}, type={type_col}, area={area_col}, count={count_col}, death={death_col}, injury={injury_col}")
+
+    for col in [count_col, death_col, injury_col]:
+        if col and col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     year_stats = None
     if year_col and year_col in df.columns:
@@ -347,6 +479,7 @@ def analyze_accidents():
         "year_stats": year_stats, "type_stats": type_stats, "area_stats": area_stats,
         "place_stats": place_stats, "vehicle_stats": vehicle_stats,
         "death_injury_stats": death_injury_stats,
+        "is_sample": is_sample,
     }
 
 
@@ -354,85 +487,90 @@ def create_accident_charts(a):
     if a is None:
         return []
     figs = []
+    sample_note = " (範例資料)" if a.get("is_sample") else ""
 
-    try:
-        if a["year_stats"] is not None and len(a["year_stats"]) > 0:
-            fig = px.bar(x=a["year_stats"].index.astype(str), y=a["year_stats"].values,
-                         labels={"x": "年度", "y": "事故件數"}, title="各年度交通事故件數統計",
-                         color=a["year_stats"].values, color_continuous_scale="Reds")
+    def save_bar(d, title, xlabel, ylabel, filename, color_scale):
+        try:
+            if d is None or len(d) == 0:
+                return False
+            fig = px.bar(x=d.index.astype(str), y=d.values,
+                         labels={"x": xlabel, "y": ylabel}, title=f"{title}{sample_note}",
+                         color=d.values, color_continuous_scale=color_scale)
             fig.update_layout(template="plotly_white")
-            fig.write_html("docs/accident_yearly_trend.html", include_plotlyjs="cdn")
-            figs.append("accident_yearly_trend.html")
-    except Exception as e:
-        print(f"[警告] 事故年度趨勢圖生成失敗: {e}")
+            fig.write_html(f"docs/{filename}", include_plotlyjs="cdn")
+            figs.append(filename)
+            print(f"    已生成: {filename}")
+            return True
+        except Exception as e:
+            print(f"    [警告] 圖表生成失敗 {filename}: {e}")
+            return False
+
+    def save_hbar(d, title, ylabel, xlabel, filename, color_scale, top=15):
+        try:
+            if d is None or len(d) == 0:
+                return False
+            d_top = d.head(top)
+            fig = px.bar(y=d_top.index[::-1], x=d_top.values[::-1],
+                         orientation="h", labels={"y": ylabel, "x": xlabel},
+                         title=f"{title}{sample_note}",
+                         color=d_top.values[::-1], color_continuous_scale=color_scale)
+            fig.update_layout(template="plotly_white")
+            fig.write_html(f"docs/{filename}", include_plotlyjs="cdn")
+            figs.append(filename)
+            print(f"    已生成: {filename}")
+            return True
+        except Exception as e:
+            print(f"    [警告] 圖表生成失敗 {filename}: {e}")
+            return False
+
+    save_bar(a["year_stats"], "各年度交通事故件數統計", "年度", "事故件數",
+             "accident_yearly_trend.html", "Reds")
 
     try:
-        if a["type_stats"] is not None and len(a["type_stats"]) > 0:
-            fig = px.pie(names=a["type_stats"].index, values=a["type_stats"].values,
-                         title="主要事故類別分布", hole=0.4)
+        d = a["type_stats"]
+        if d is not None and len(d) > 0:
+            fig = px.pie(names=d.index, values=d.values,
+                         title=f"主要事故類別分布{sample_note}", hole=0.4)
             fig.update_traces(textposition="inside", textinfo="percent+label")
             fig.update_layout(template="plotly_white")
             fig.write_html("docs/accident_type_distribution.html", include_plotlyjs="cdn")
             figs.append("accident_type_distribution.html")
+            print(f"    已生成: accident_type_distribution.html")
     except Exception as e:
-        print(f"[警告] 事故類別圖生成失敗: {e}")
+        print(f"    [警告] 事故類別圖生成失敗: {e}")
+
+    save_bar(a["area_stats"], "各行政區交通事故分布", "地區", "事故件數",
+             "accident_area_distribution.html", "Oranges")
+    save_hbar(a["place_stats"], "事故場所類別分布 TOP 15", "場所類別", "事故件數",
+              "accident_place_distribution.html", "Blues")
+    save_hbar(a["vehicle_stats"], "事故運具類別分布 TOP 15", "運具類別", "事故件數",
+              "accident_vehicle_distribution.html", "Greens")
 
     try:
-        if a["area_stats"] is not None and len(a["area_stats"]) > 0:
-            fig = px.bar(x=a["area_stats"].index, y=a["area_stats"].values,
-                         labels={"x": "地區", "y": "事故件數"}, title="各行政區交通事故分布",
-                         color=a["area_stats"].values, color_continuous_scale="Oranges")
-            fig.update_layout(template="plotly_white", xaxis_tickangle=-45)
-            fig.write_html("docs/accident_area_distribution.html", include_plotlyjs="cdn")
-            figs.append("accident_area_distribution.html")
-    except Exception as e:
-        print(f"[警告] 事故行政區圖生成失敗: {e}")
-
-    try:
-        if a["place_stats"] is not None and len(a["place_stats"]) > 0:
-            fig = px.bar(y=a["place_stats"].head(15).index[::-1], x=a["place_stats"].head(15).values[::-1],
-                         orientation="h", labels={"y": "場所類別", "x": "事故件數"}, title="事故場所類別分布 TOP 15",
-                         color=a["place_stats"].head(15).values[::-1], color_continuous_scale="Blues")
-            fig.update_layout(template="plotly_white")
-            fig.write_html("docs/accident_place_distribution.html", include_plotlyjs="cdn")
-            figs.append("accident_place_distribution.html")
-    except Exception as e:
-        print(f"[警告] 事故場所圖生成失敗: {e}")
-
-    try:
-        if a["vehicle_stats"] is not None and len(a["vehicle_stats"]) > 0:
-            fig = px.bar(y=a["vehicle_stats"].head(15).index[::-1], x=a["vehicle_stats"].head(15).values[::-1],
-                         orientation="h", labels={"y": "運具類別", "x": "事故件數"}, title="事故運具類別分布 TOP 15",
-                         color=a["vehicle_stats"].head(15).values[::-1], color_continuous_scale="Greens")
-            fig.update_layout(template="plotly_white")
-            fig.write_html("docs/accident_vehicle_distribution.html", include_plotlyjs="cdn")
-            figs.append("accident_vehicle_distribution.html")
-    except Exception as e:
-        print(f"[警告] 事故運具圖生成失敗: {e}")
-
-    try:
-        if a["death_injury_stats"] is not None and len(a["death_injury_stats"]) > 0:
+        dis = a.get("death_injury_stats")
+        if dis is not None and len(dis) > 0:
             fig = go.Figure()
-            for col in a["death_injury_stats"].columns:
+            for col in dis.columns:
                 fig.add_trace(go.Scatter(
-                    x=a["death_injury_stats"].index.astype(str),
-                    y=a["death_injury_stats"][col].values,
+                    x=dis.index.astype(str), y=dis[col].values,
                     mode="lines+markers", name=col,
                 ))
-            fig.update_layout(title="各年度交通事故傷亡趨勢", xaxis_title="年度", yaxis_title="人數/件數",
-                              template="plotly_white",
-                              legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            fig.update_layout(
+                title=f"各年度交通事故傷亡趨勢{sample_note}",
+                xaxis_title="年度", yaxis_title="人數/件數", template="plotly_white",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             fig.write_html("docs/accident_casualty_trend.html", include_plotlyjs="cdn")
             figs.append("accident_casualty_trend.html")
+            print(f"    已生成: accident_casualty_trend.html")
     except Exception as e:
-        print(f"[警告] 事故傷亡趨勢圖生成失敗: {e}")
+        print(f"    [警告] 傷亡趨勢圖生失敗: {e}")
 
-    print(f"事故圖表: {len(figs)} 個")
+    print(f"  事故圖表共 {len(figs)} 個")
     return figs
 
 
 def match_area_coords(area_name):
-    area_key = str(area_name).replace("桃園", "").replace("區", "區")
+    area_key = str(area_name).replace("桃園市", "").replace("桃園", "")
     for key, coord in TAOYUAN_AREAS.items():
         if key in area_key or area_key in key:
             return coord
@@ -448,17 +586,23 @@ def create_accident_map(a):
     death_col = a["death_col"]
     injury_col = a["injury_col"]
     year_col = a["year_col"]
+    sample_note = " (範例資料)" if a.get("is_sample") else ""
+
+    if not area_col or area_col not in df.columns:
+        print("  [資訊] 缺少行政區資料，略過事故地圖")
+        return None
 
     try:
         m = folium.Map(location=[24.95, 121.25], zoom_start=10, tiles="CartoDB positron")
 
         if year_col and year_col in df.columns:
-            for year in sorted(df[year_col].dropna().unique()):
+            years = sorted(df[year_col].dropna().unique())
+            for year in years:
                 year_df = df[df[year_col] == year]
                 if len(year_df) == 0:
                     continue
-                fg = folium.FeatureGroup(name=f"{year}年事故熱點")
-                if area_col and area_col in year_df.columns:
+                fg = folium.FeatureGroup(name=f"{year}年事故熱點{sample_note}")
+                if area_col in year_df.columns:
                     summary = year_df.groupby(area_col)[count_col].sum() if count_col else year_df[area_col].value_counts()
                     for area, count in summary.items():
                         coords = match_area_coords(area)
@@ -471,167 +615,109 @@ def create_accident_map(a):
                             if injury_col and injury_col in year_df.columns:
                                 injuries = year_df[year_df[area_col] == area][injury_col].sum()
                                 popup += f"<br>受傷: {int(injuries)}"
-                            folium.CircleMarker(location=coords, radius=radius,
-                                                popup=folium.Popup(popup, max_width=250),
-                                                color="orange", fill=True, fill_color="orange", fill_opacity=0.6).add_to(fg)
+                            folium.CircleMarker(
+                                location=coords, radius=radius,
+                                popup=folium.Popup(popup, max_width=250),
+                                color="orange", fill=True, fill_color="orange", fill_opacity=0.6
+                            ).add_to(fg)
                 fg.add_to(m)
         else:
-            if area_col and area_col in df.columns:
-                summary = df.groupby(area_col)[count_col].sum() if count_col else df[area_col].value_counts()
-                for area, count in summary.items():
-                    coords = match_area_coords(area)
-                    if coords:
-                        radius = min(max(float(count) ** 0.5 * 2, 5), 50)
-                        popup = f"<b>{area}</b><br>事故件數: {int(count)}"
-                        folium.CircleMarker(location=coords, radius=radius,
-                                            popup=folium.Popup(popup, max_width=250),
-                                            color="orange", fill=True, fill_color="orange", fill_opacity=0.6).add_to(m)
+            summary = df.groupby(area_col)[count_col].sum() if count_col else df[area_col].value_counts()
+            for area, count in summary.items():
+                coords = match_area_coords(area)
+                if coords:
+                    radius = min(max(float(count) ** 0.5 * 2, 5), 50)
+                    popup = f"<b>{area}</b><br>事故件數: {int(count)}"
+                    folium.CircleMarker(
+                        location=coords, radius=radius,
+                        popup=folium.Popup(popup, max_width=250),
+                        color="orange", fill=True, fill_color="orange", fill_opacity=0.6
+                    ).add_to(m)
 
         folium.LayerControl().add_to(m)
         m.save("docs/accident_map.html")
-        print("已生成交通事故熱點地圖")
+        print(f"  已生成交通事故熱點地圖{sample_note}")
         return "accident_map.html"
     except Exception as e:
-        print(f"[警告] 事故地圖生成失敗: {e}")
+        print(f"  [警告] 事故地圖生成失敗: {e}")
         traceback.print_exc()
         return None
 
 
-# ========== 整合主報 HTML 頁面 ==========
-
-def generate_index(violation_figs, accident_figs, violation_map, accident_map):
-    """生成整合主報告 HTML 頁面，即使部分資料缺失也會生成頁面"""
+def generate_index(violation_figs, accident_figs, violation_map, accident_map,
+                   violation_sample=False, accident_sample=False):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sample_banner = ""
+    if violation_sample or accident_sample:
+        sample_banner = '<div style="background:#fff3cd;border:1px solid #ffeaa7;border-radius:8px;padding:1rem;margin:1rem 0;text-align:center;color:#856404;"><strong>注意：</strong>目前顯示的資料為範例資料。API 介接可能因網路或資料集異動而失敗，請檢查 GitHub Actions 日誌確認 API 狀態。</div>'
 
-    # 違規裁罰區塊
-    v_section = ""
-    if violation_figs:
-        v_section = '<h2 id="violations" class="section-title">交通違規裁罰分析</h2>'
-        v_section += '<div class="chart-grid">'
-        for fig in violation_figs:
-            name = fig.replace(".html", "").replace("violation_", "").replace("_", " ").title()
-            v_section += f'<div class="chart-card"><h3>{name}</h3><iframe src="{fig}" width="100%" height="450"></iframe></div>'
-        v_section += '</div>'
-        if violation_map:
-            v_section += f'<div class="map-card"><h3>違規裁罰點位分布地圖</h3><iframe src="{violation_map}" width="100%" height="600"></iframe></div>'
-    else:
-        v_section = '<h2 id="violations" class="section-title">交通違規裁罰分析</h2><div class="chart-card"><p style="padding:2rem;color:#888;text-align:center;">暫無違規裁罰資料或資料介接失敗</p></div>'
+    def make_section(title, anchor, figs, map_file, section_type):
+        if not figs and not map_file:
+            return f'<h2 id="{anchor}" class="section-title">{title}</h2><div class="chart-card"><p style="padding:2rem;color:#888;text-align:center;">暫無資料</p></div>'
+        html = f'<h2 id="{anchor}" class="section-title">{title}</h2>'
+        if figs:
+            html += '<div class="chart-grid">'
+            for fig in figs:
+                name = fig.replace(".html", "").replace(f"{section_type}_", "").replace("_", " ").title()
+                html += f'<div class="chart-card"><h3>{name}</h3><iframe src="{fig}" width="100%" height="450"></iframe></div>'
+            html += '</div>'
+        if map_file:
+            map_title = "違規裁罰點位分布地圖" if section_type == "violation" else "交通事故熱點分布地圖"
+            html += f'<div class="map-card"><h3>{map_title}</h3><iframe src="{map_file}" width="100%" height="600"></iframe></div>'
+        return html
 
-    # 交通事故區塊
-    a_section = ""
-    if accident_figs:
-        a_section = '<h2 id="accidents" class="section-title">交通事故分析</h2>'
-        a_section += '<div class="chart-grid">'
-        for fig in accident_figs:
-            name = fig.replace(".html", "").replace("accident_", "").replace("_", " ").title()
-            a_section += f'<div class="chart-card"><h3>{name}</h3><iframe src="{fig}" width="100%" height="450"></iframe></div>'
-        a_section += '</div>'
-        if accident_map:
-            a_section += f'<div class="map-card"><h3>交通事故熱點分布地圖</h3><iframe src="{accident_map}" width="100%" height="600"></iframe></div>'
-    else:
-        a_section = '<h2 id="accidents" class="section-title">交通事故分析</h2><div class="chart-card"><p style="padding:2rem;color:#888;text-align:center;">暫無交通事故資料或資料介接失敗</p></div>'
+    v_section = make_section("交通違規裁罰分析", "violations", violation_figs, violation_map, "violation")
+    a_section = make_section("交通事故分析", "accidents", accident_figs, accident_map, "accident")
 
-    html = f"""<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>桃園市交通裁罰及傷亡資訊報告</title>
-<style>
-:root {{ --primary: #1a5276; --secondary: #2874a6; --accent: #e74c3c; --bg: #f8f9fa; --card-bg: #ffffff; --text: #2c3e50; --border: #dee2e6; }}
-* {{ margin: 0; padding: 0; box-sizing: border-box; }}
-body {{ font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }}
-header {{ background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; padding: 2rem 1rem; text-align: center; position: relative; }}
-header h1 {{ font-size: 1.8rem; margin-bottom: 0.5rem; }}
-header p {{ opacity: 0.9; font-size: 0.95rem; }}
-nav {{ background: #1a5276; padding: 0.5rem 1rem; text-align: center; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-nav a {{ color: white; text-decoration: none; margin: 0 1rem; font-size: 0.95rem; padding: 0.3rem 0.8rem; border-radius: 4px; transition: background 0.2s; display: inline-block; }}
-nav a:hover {{ background: rgba(255,255,255,0.2); }}
-.update-time {{ text-align: center; padding: 0.5rem; background: #e8f4f8; font-size: 0.85rem; color: #555; }}
-main {{ max-width: 1400px; margin: 0 auto; padding: 1.5rem; }}
-.section-title {{ font-size: 1.4rem; color: var(--primary); margin: 2rem 0 1rem; padding-bottom: 0.5rem; border-bottom: 3px solid var(--secondary); }}
-.chart-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }}
-.chart-card, .map-card {{ background: var(--card-bg); border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 1rem; transition: transform 0.2s; }}
-.chart-card:hover, .map-card:hover {{ transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.12); }}
-.chart-card h3, .map-card h3 {{ font-size: 1rem; color: var(--primary); margin-bottom: 0.75rem; padding-left: 0.5rem; border-left: 4px solid var(--accent); }}
-.map-card {{ margin-bottom: 1.5rem; }}
-iframe {{ border-radius: 8px; width: 100%; border: none; }}
-footer {{ text-align: center; padding: 1.5rem; color: #888; font-size: 0.8rem; border-top: 1px solid var(--border); }}
-footer a {{ color: var(--secondary); text-decoration: none; }}
-@media (max-width: 600px) {{ .chart-grid {{ grid-template-columns: 1fr; }} header h1 {{ font-size: 1.3rem; }} nav a {{ margin: 0 0.3rem; font-size: 0.85rem; }} }}
-</style>
-</head>
-<body>
-<header>
-<h1>桃園市交通裁罰及傷亡資訊報告</h1>
-<p>資料來源：桃園資料開放平台 | 透過 GitHub Actions 自動更新</p>
-</header>
-<nav>
-<a href="#violations">交通違規裁罰</a>
-<a href="#accidents">交通事故分析</a>
-</nav>
-<div class="update-time">報告生成時間：{now}</div>
-<main>
-{v_section}
-{a_section}
-</main>
-<footer>
-<p>資料來源：<a href="https://opendata.tycg.gov.tw" target="_blank">桃園資料開放平台</a></p>
-<p>本報告由 GitHub Actions 自動生成僅供參考</p>
-</footer>
-</body>
-</html>"""
+    html = '<!DOCTYPE html>\n<html lang="zh-TW">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1.0">\n<title>桃園市交通裁罰及傷亡資訊報告</title>\n<style>\n:root { --primary: #1a5276; --secondary: #2874a6; --accent: #e74c3c; --bg: #f8f9fa; --card-bg: #ffffff; --text: #2c3e50; --border: #dee2e6; }\n* { margin: 0; padding: 0; box-sizing: border-box; }\nbody { font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }\nheader { background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; padding: 2rem 1rem; text-align: center; position: relative; }\nheader h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }\nheader p { opacity: 0.9; font-size: 0.95rem; }\nnav { background: #1a5276; padding: 0.5rem 1rem; text-align: center; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }\nnav a { color: white; text-decoration: none; margin: 0 1rem; font-size: 0.95rem; padding: 0.3rem 0.8rem; border-radius: 4px; transition: background 0.2s; display: inline-block; }\nnav a:hover { background: rgba(255,255,255,0.2); }\n.update-time { text-align: center; padding: 0.5rem; background: #e8f4f8; font-size: 0.85rem; color: #555; }\nmain { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }\n.section-title { font-size: 1.4rem; color: var(--primary); margin: 2rem 0 1rem; padding-bottom: 0.5rem; border-bottom: 3px solid var(--secondary); }\n.chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem; }\n.chart-card, .map-card { background: var(--card-bg); border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 1rem; transition: transform 0.2s; }\n.chart-card:hover, .map-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.12); }\n.chart-card h3, .map-card h3 { font-size: 1rem; color: var(--primary); margin-bottom: 0.75rem; padding-left: 0.5rem; border-left: 4px solid var(--accent); }\n.map-card { margin-bottom: 1.5rem; }\niframe { border-radius: 8px; width: 100%; border: none; }\nfooter { text-align: center; padding: 1.5rem; color: #888; font-size: 0.8rem; border-top: 1px solid var(--border); }\nfooter a { color: var(--secondary); text-decoration: none; }\n@media (max-width: 600px) { .chart-grid { grid-template-columns: 1fr; } header h1 { font-size: 1.3rem; } nav a { margin: 0 0.3rem; font-size: 0.85rem; } }\n</style>\n</head>\n<body>\n<header>\n<h1>桃園市交通裁罰及傷亡資訊報告</h1>\n<p>資料來源：桃園資料開放平台 | 透過 GitHub Actions 自動更新</p>\n</header>\n<nav>\n<a href="#violations">交通違規裁罰</a>\n<a href="#accidents">交通事故分析</a>\n</nav>\n<div class="update-time">報告生成時間：' + now + '</div>' + sample_banner + '\n<main>\n' + v_section + '\n' + a_section + '\n</main>\n<footer>\n<p>資料來源：<a href="https://opendata.tycg.gov.tw" target="_blank">桃園資料開放平台</a></p>\n<p>本報告由 GitHub Actions 自動生成，僅供參考</p>\n</footer>\n</body>\n</html>'
 
-    # 確保 docs 目錄存在
     os.makedirs("docs", exist_ok=True)
     index_path = "docs/index.html"
     with open(index_path, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"\n[完成] 已生成整合主報告頁面: {index_path}")
-    # 驗證檔案是否寫入成功
+
     if os.path.exists(index_path):
         size = os.path.getsize(index_path)
-        print(f"[完成] 檔案大小: {size} bytes")
+        print(f"\n[完成] 已生成整合主報告頁面: {index_path} ({size} bytes)")
     else:
-        print("[錯誤] 檔案寫入失敗！")
+        print(f"\n[錯誤] 檔案寫入失敗！")
     return index_path
 
 
-# ========== 主程式 ==========
-
 def main():
     print("=" * 60)
-    print("桃園市交通裁罰及傷亡資訊報告生成器")
-    print("模式: API 直接介接，不儲存中間檔案")
+    print("桃園市交通裁罰及傷亡資訊報告生成器 v2.1")
+    print("模式: API 直接介接 + 範例資料 fallback")
     print("=" * 60)
 
-    vf = []
-    vm = None
-    af = []
-    am = None
+    vf, vm, af, am = [], None, [], None
+    v_sample, a_sample = False, False
 
     try:
         va = analyze_violations()
-        if va is not None:
+        if va:
             vf = create_violation_charts(va)
             vm = create_violation_map(va)
+            v_sample = va.get("is_sample", False)
     except Exception as e:
-        print(f"[錯誤] 違規分析階段失敗: {e}")
+        print(f"\n[錯誤] 違規分析階段失敗: {e}")
         traceback.print_exc()
 
     try:
         aa = analyze_accidents()
-        if aa is not None:
+        if aa:
             af = create_accident_charts(aa)
             am = create_accident_map(aa)
+            a_sample = aa.get("is_sample", False)
     except Exception as e:
-        print(f"[錯誤] 事故分析階段失敗: {e}")
+        print(f"\n[錯誤] 事故分析階段失敗: {e}")
         traceback.print_exc()
 
-    # 無論前面是否失敗，都強制生成 index.html
-    print("\n生成整合主報告頁面...")
+    print("\n" + "-" * 60)
+    print("生成整合主報告頁面...")
+    print("-" * 60)
     try:
-        generate_index(vf, af, vm, am)
+        generate_index(vf, af, vm, am, v_sample, a_sample)
     except Exception as e:
         print(f"[錯誤] 生成主報告頁面失敗: {e}")
         traceback.print_exc()
@@ -642,6 +728,8 @@ def main():
     print("主頁面: docs/index.html")
     print("=" * 60)
 
+    return 0 if (vf or af) else 1
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
