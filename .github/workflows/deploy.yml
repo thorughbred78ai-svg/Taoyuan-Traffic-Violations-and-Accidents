@@ -1,14 +1,14 @@
-name: 更新桃園交通裁罰及傷亡資訊報告
+name: Generate and Deploy Report
 
 on:
   schedule:
-    - cron: '0 2 * * *'
-  workflow_dispatch:
+    - cron: '0 2 * * *'   # 每天 UTC 02:00 執行（台灣時間 10:00）
+  workflow_dispatch:       # 支援手動觸發
   push:
-    branches: [ main ]
+    branches: [main, master]
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -17,13 +17,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -32,17 +32,21 @@ jobs:
         run: |
           pip install requests pandas plotly folium
 
-      - name: Generate report from API
+      - name: Generate report
         run: python generate_report.py
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact
+      - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './docs'
+          path: docs/
 
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
