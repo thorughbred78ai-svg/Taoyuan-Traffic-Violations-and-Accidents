@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-桃園市交通裁罰及傷亡資訊報告生成器 v5.2
-- 全年度與各年度分析摘要、決策建議
+桃園市交通裁罰及傷亡資訊報告生成器 v5.3
+- KPI、圖表、地圖、分析摘要、決策建議全部支援年度切換
 - 修復事故資料顯示問題
 - 免費 GIS 底圖（無需 API Key）
 """
@@ -268,8 +268,64 @@ def compute_yoy_change(series):
     return change, latest
 
 
+def compute_violation_kpi(df, yc, ac, lc, year_filter=None):
+    """計算違規 KPI（全年度或單一年度）"""
+    if year_filter is not None and yc and yc in df.columns:
+        df = df[df[yc] == year_filter]
+
+    total_cases = len(df)
+    top_district = "N/A"
+    top_violation = "N/A"
+
+    if ac and ac in df.columns and len(df) > 0:
+        area_counts = df[ac].value_counts()
+        if len(area_counts) > 0:
+            top_district = str(area_counts.index[0])
+
+    if lc and lc in df.columns and len(df) > 0:
+        law_counts = df[lc].value_counts()
+        if len(law_counts) > 0:
+            top_violation = str(law_counts.index[0])
+
+    return {
+        "total_cases": total_cases,
+        "top_district": top_district,
+        "top_violation": top_violation,
+    }
+
+
+def compute_accident_kpi(df, yc, ac, tc, cc, dc, ic, year_filter=None):
+    """計算事故 KPI（全年度或單一年度）"""
+    if year_filter is not None and yc and yc in df.columns:
+        df = df[df[yc] == year_filter]
+
+    total_cases = df[cc].sum() if cc and cc in df.columns else len(df)
+    total_deaths = df[dc].sum() if dc and dc in df.columns else 0
+    total_injuries = df[ic].sum() if ic and ic in df.columns else 0
+    top_district = "N/A"
+    top_type = "N/A"
+
+    if ac and ac in df.columns and cc and cc in df.columns and len(df) > 0:
+        area_stats = df.groupby(ac)[cc].sum().sort_values(ascending=False)
+        if len(area_stats) > 0:
+            top_district = str(area_stats.index[0])
+
+    if tc and tc in df.columns and cc and cc in df.columns and len(df) > 0:
+        type_stats = df.groupby(tc)[cc].sum().sort_values(ascending=False)
+        if len(type_stats) > 0:
+            top_type = str(type_stats.index[0])
+
+    return {
+        "total_cases": int(total_cases),
+        "total_deaths": int(total_deaths),
+        "total_injuries": int(total_injuries),
+        "top_district": top_district,
+        "top_type": top_type,
+    }
+
+
 def generate_violation_insights(df, yc, ac, lc, year_filter=None):
-    """生成違規分析摘要（可針對全年度或單一年度）"""
+    """生成違規分析摘要（全年度或單一年度）"""
     insights = []
     if year_filter is not None and yc and yc in df.columns:
         df_filtered = df[df[yc] == year_filter]
@@ -304,7 +360,7 @@ def generate_violation_insights(df, yc, ac, lc, year_filter=None):
 
 
 def generate_accident_insights(df, yc, ac, tc, cc, dc, ic, year_filter=None):
-    """生成事故分析摘要（可針對全年度或單一年度）"""
+    """生成事故分析摘要（全年度或單一年度）"""
     insights = []
     if year_filter is not None and yc and yc in df.columns:
         df_filtered = df[df[yc] == year_filter]
@@ -349,7 +405,7 @@ def generate_accident_insights(df, yc, ac, tc, cc, dc, ic, year_filter=None):
 
 
 def generate_violation_recommendations(df, ac, lc, year_filter=None):
-    """生成違規決策建議（可針對全年度或單一年度）"""
+    """生成違規決策建議（全年度或單一年度）"""
     recs = []
     if year_filter is not None:
         year_label = f"{year_filter}年"
@@ -379,7 +435,7 @@ def generate_violation_recommendations(df, ac, lc, year_filter=None):
 
 
 def generate_accident_recommendations(df, yc, ac, tc, cc, dc, year_filter=None):
-    """生成事故決策建議（可針對全年度或單一年度）"""
+    """生成事故決策建議（全年度或單一年度）"""
     recs = []
     if year_filter is not None:
         year_label = f"{year_filter}年"
@@ -447,11 +503,21 @@ def analyze_violations():
     fact_counts = df[fc].value_counts().head(20) if fc else pd.Series(dtype=int)
     area_counts = df[ac].value_counts() if ac else pd.Series(dtype=int)
 
-    total_cases = int(year_counts.sum()) if year_counts is not None else 0
-    top_district = area_counts.index[0] if area_counts is not None and len(area_counts) > 0 else "N/A"
-    top_law = law_counts.index[0] if law_counts is not None and len(law_counts) > 0 else "N/A"
+    # 全年度 KPI
+    kpi_all = compute_violation_kpi(df, yc, ac, lc, year_filter=None)
     change, latest = compute_yoy_change(year_counts)
-    avg_cases = year_counts.mean() if year_counts is not None else 0
+    kpi_all["yoy_change"] = change
+    kpi_all["avg_cases"] = year_counts.mean() if year_counts is not None else 0
+
+    # 各年度 KPI
+    kpi_year = {}
+    if yc and years:
+        for year in years:
+            ky = compute_violation_kpi(df, yc, ac, lc, year_filter=year)
+            # 單一年度的 YoY 與年均無意義，設為 N/A
+            ky["yoy_change"] = None
+            ky["avg_cases"] = year_counts.get(year, 0) if year_counts is not None else 0
+            kpi_year[str(year)] = ky
 
     # 全年度分析摘要與建議
     all_insights = generate_violation_insights(df, yc, ac, lc, year_filter=None)
@@ -470,13 +536,8 @@ def analyze_violations():
         "yc": yc, "lc": lc, "fc": fc, "ac": ac, "lac": lac, "loc": loc, "rc": rc,
         "year_counts": year_counts, "law_counts": law_counts,
         "fact_counts": fact_counts, "area_counts": area_counts,
-        "kpi": {
-            "total_cases": total_cases,
-            "top_district": str(top_district),
-            "top_violation": str(top_law),
-            "yoy_change": change,
-            "avg_cases": avg_cases,
-        },
+        "kpi_all": kpi_all,
+        "kpi_year": kpi_year,
         "all_insights": all_insights,
         "all_recommendations": all_recommendations,
         "year_insights": year_insights,
@@ -731,13 +792,20 @@ def analyze_accidents():
         if agg:
             dis = df.groupby(yc).agg(**agg)
 
-    total_cases = int(year_stats.sum()) if year_stats is not None else 0
-    total_deaths = int(df[dc].sum()) if dc and dc in df.columns else 0
-    total_injuries = int(df[ic].sum()) if ic and ic in df.columns else 0
-    top_district = area_stats.index[0] if area_stats is not None and len(area_stats) > 0 else "N/A"
-    top_type = type_stats.index[0] if type_stats is not None and len(type_stats) > 0 else "N/A"
+    # 全年度 KPI
+    kpi_all = compute_accident_kpi(df, yc, ac, tc, cc, dc, ic, year_filter=None)
     change, latest = compute_yoy_change(year_stats)
-    avg_cases = year_stats.mean() if year_stats is not None else 0
+    kpi_all["yoy_change"] = change
+    kpi_all["avg_cases"] = year_stats.mean() if year_stats is not None else 0
+
+    # 各年度 KPI
+    kpi_year = {}
+    if yc and years:
+        for year in years:
+            ky = compute_accident_kpi(df, yc, ac, tc, cc, dc, ic, year_filter=year)
+            ky["yoy_change"] = None
+            ky["avg_cases"] = year_stats.get(year, 0) if year_stats is not None else 0
+            kpi_year[str(year)] = ky
 
     # 全年度分析摘要與建議
     all_insights = generate_accident_insights(df, yc, ac, tc, cc, dc, ic, year_filter=None)
@@ -756,15 +824,8 @@ def analyze_accidents():
         "yc": yc, "tc": tc, "ac": ac, "pc": pc, "vc": vc, "cc": cc, "dc": dc, "ic": ic,
         "year_stats": year_stats, "type_stats": type_stats, "area_stats": area_stats,
         "place_stats": place_stats, "vehicle_stats": vehicle_stats, "dis": dis,
-        "kpi": {
-            "total_cases": total_cases,
-            "total_deaths": total_deaths,
-            "total_injuries": total_injuries,
-            "top_district": str(top_district),
-            "top_type": str(top_type),
-            "yoy_change": change,
-            "avg_cases": avg_cases,
-        },
+        "kpi_all": kpi_all,
+        "kpi_year": kpi_year,
         "all_insights": all_insights,
         "all_recommendations": all_recommendations,
         "year_insights": year_insights,
@@ -1008,7 +1069,8 @@ def generate_index(v_data, a_data):
     v_all_map = v_data.get("all_map")
     v_years = v_data.get("years", [])
     v_sample = v_data.get("is_sample", False)
-    v_kpi = v_data.get("kpi", {})
+    v_kpi_all = v_data.get("kpi_all", {})
+    v_kpi_year = v_data.get("kpi_year", {})
     v_all_insights = v_data.get("all_insights", [])
     v_all_recommendations = v_data.get("all_recommendations", [])
     v_year_insights = v_data.get("year_insights", {})
@@ -1020,7 +1082,8 @@ def generate_index(v_data, a_data):
     a_all_map = a_data.get("all_map")
     a_years = a_data.get("years", [])
     a_sample = a_data.get("is_sample", False)
-    a_kpi = a_data.get("kpi", {})
+    a_kpi_all = a_data.get("kpi_all", {})
+    a_kpi_year = a_data.get("kpi_year", {})
     a_all_insights = a_data.get("all_insights", [])
     a_all_recommendations = a_data.get("all_recommendations", [])
     a_year_insights = a_data.get("year_insights", {})
@@ -1036,14 +1099,60 @@ def generate_index(v_data, a_data):
     for year in all_years:
         year_options += f'    <option value="{year}">{year}年</option>\n'
 
-    # 生成分析摘要與建議的 HTML（支援年度切換）
+    # 生成 KPI HTML（支援年度切換）
+    def build_kpi_html(kpi_all, kpi_year, section, is_accident=False):
+        # 全年度 KPI
+        change = kpi_all.get("yoy_change")
+        change_str = f"{change:+.1f}%" if change is not None else "N/A"
+        change_color = "#e74c3c" if change and change > 0 else "#27ae60" if change and change < 0 else "#1a5276"
+
+        html = f'<div id="{section}_kpi_all" class="kpi-grid" style="display:grid;">\n'
+        html += kpi_card("&#128203;", "總案件數", f"{kpi_all.get('total_cases', 0):,}")
+        if is_accident:
+            html += kpi_card("&#128128;", "死亡人數", f"{kpi_all.get('total_deaths', 0):,}")
+            html += kpi_card("&#129657;", "受傷人數", f"{kpi_all.get('total_injuries', 0):,}")
+        html += kpi_card("&#128200;", "年度變化", change_str, color=change_color)
+        html += kpi_card("&#128205;", "年均案件數", f"{kpi_all.get('avg_cases', 0):.0f}")
+        html += kpi_card("&#128681;", "最高風險行政區", kpi_all.get('top_district', 'N/A'))
+        if is_accident:
+            html += kpi_card("&#9888;", "主要事故類型", kpi_all.get('top_type', 'N/A'))
+        else:
+            html += kpi_card("&#9888;", "主要違規類型", kpi_all.get('top_violation', 'N/A'))
+        html += '</div>'
+
+        # 各年度 KPI
+        for year, ky in kpi_year.items():
+            html += f'<div id="{section}_kpi_{year}" class="kpi-grid" style="display:none;">\n'
+            html += kpi_card("&#128203;", "總案件數", f"{ky.get('total_cases', 0):,}")
+            if is_accident:
+                html += kpi_card("&#128128;", "死亡人數", f"{ky.get('total_deaths', 0):,}")
+                html += kpi_card("&#129657;", "受傷人數", f"{ky.get('total_injuries', 0):,}")
+            html += kpi_card("&#128200;", "年度變化", "N/A", color="#1a5276")
+            html += kpi_card("&#128205;", "該年案件數", f"{ky.get('avg_cases', 0):.0f}")
+            html += kpi_card("&#128681;", "最高風險行政區", ky.get('top_district', 'N/A'))
+            if is_accident:
+                html += kpi_card("&#9888;", "主要事故類型", ky.get('top_type', 'N/A'))
+            else:
+                html += kpi_card("&#9888;", "主要違規類型", ky.get('top_violation', 'N/A'))
+            html += '</div>'
+
+        return html
+
+    def kpi_card(icon, label, value, unit="", color="#1a5276"):
+        return f'''<div class="kpi-card" style="border-top-color:{color}">
+  <div class="kpi-icon">{icon}</div>
+  <div class="kpi-label">{label}</div>
+  <div class="kpi-value">{value}<span class="kpi-unit">{unit}</span></div>
+</div>'''
+
+    # 生成分析摘要與建議 HTML（支援年度切換）
     def build_insights_html(all_insights, year_insights, section):
         html = f'<div id="{section}_insights_all" class="insights-card" style="display:block;">'
         html += '<h3>專業分析摘要</h3><ul>'
         for item in all_insights:
             html += f'<li>{item}</li>'
         html += '</ul></div>'
-        
+
         for year, insights in year_insights.items():
             html += f'<div id="{section}_insights_{year}" class="insights-card" style="display:none;">'
             html += f'<h3>{year}年 專業分析摘要</h3><ul>'
@@ -1058,7 +1167,7 @@ def generate_index(v_data, a_data):
         for item in all_recs:
             html += f'<li>{item}</li>'
         html += '</ul></div>'
-        
+
         for year, recs in year_recs.items():
             html += f'<div id="{section}_recommendations_{year}" class="recommendations-card" style="display:none;">'
             html += f'<h3>{year}年 決策建議</h3><ul>'
@@ -1096,6 +1205,20 @@ function switchMap(section, year) {
     }
 }
 
+function switchKPI(section, year) {
+    var allDiv = document.getElementById(section + '_kpi_all');
+    if (allDiv) allDiv.style.display = 'none';
+    document.querySelectorAll('[id^="' + section + '_kpi_"]').forEach(function(el) {
+        if (el.id !== section + '_kpi_all') el.style.display = 'none';
+    });
+    if (year === 'all') {
+        if (allDiv) allDiv.style.display = 'grid';
+    } else {
+        var target = document.getElementById(section + '_kpi_' + year);
+        if (target) target.style.display = 'grid';
+    }
+}
+
 function switchInsights(section, year) {
     var allDiv = document.getElementById(section + '_insights_all');
     if (allDiv) allDiv.style.display = 'none';
@@ -1125,6 +1248,7 @@ function switchRecommendations(section, year) {
 }
 
 function switchYear(section, year) {
+    switchKPI(section, year);
     switchCharts(section, year);
     switchMap(section, year);
     switchInsights(section, year);
@@ -1176,38 +1300,8 @@ function switchYear(section, year) {
     if not a_maps_html:
         a_maps_html = '<p style="padding:2rem;color:#888;text-align:center;">暫無地圖資料</p>'
 
-    def kpi_card(icon, label, value, unit="", color="#1a5276"):
-        return f'''<div class="kpi-card" style="border-top-color:{color}">
-  <div class="kpi-icon">{icon}</div>
-  <div class="kpi-label">{label}</div>
-  <div class="kpi-value">{value}<span class="kpi-unit">{unit}</span></div>
-</div>'''
-
-    v_change = v_kpi.get("yoy_change")
-    v_change_str = f"{v_change:+.1f}%" if v_change is not None else "N/A"
-    v_change_color = "#e74c3c" if v_change and v_change > 0 else "#27ae60" if v_change and v_change < 0 else "#1a5276"
-
-    v_kpi_html = '<div class="kpi-grid">\n'
-    v_kpi_html += kpi_card("&#128203;", "總案件數", f"{v_kpi.get('total_cases', 0):,}")
-    v_kpi_html += kpi_card("&#128200;", "年度變化", v_change_str, color=v_change_color)
-    v_kpi_html += kpi_card("&#128205;", "年均案件數", f"{v_kpi.get('avg_cases', 0):.0f}")
-    v_kpi_html += kpi_card("&#128681;", "最高風險行政區", v_kpi.get('top_district', 'N/A'))
-    v_kpi_html += kpi_card("&#9888;", "主要違規類型", v_kpi.get('top_violation', 'N/A'))
-    v_kpi_html += '</div>'
-
-    a_change = a_kpi.get("yoy_change")
-    a_change_str = f"{a_change:+.1f}%" if a_change is not None else "N/A"
-    a_change_color = "#e74c3c" if a_change and a_change > 0 else "#27ae60" if a_change and a_change < 0 else "#1a5276"
-
-    a_kpi_html = '<div class="kpi-grid">\n'
-    a_kpi_html += kpi_card("&#128203;", "總案件數", f"{a_kpi.get('total_cases', 0):,}")
-    a_kpi_html += kpi_card("&#128128;", "死亡人數", f"{a_kpi.get('total_deaths', 0):,}")
-    a_kpi_html += kpi_card("&#129657;", "受傷人數", f"{a_kpi.get('total_injuries', 0):,}")
-    a_kpi_html += kpi_card("&#128200;", "年度變化", a_change_str, color=a_change_color)
-    a_kpi_html += kpi_card("&#128205;", "年均案件數", f"{a_kpi.get('avg_cases', 0):.0f}")
-    a_kpi_html += kpi_card("&#128681;", "最高風險行政區", a_kpi.get('top_district', 'N/A'))
-    a_kpi_html += kpi_card("&#9888;", "主要事故類型", a_kpi.get('top_type', 'N/A'))
-    a_kpi_html += '</div>'
+    v_kpi_html = build_kpi_html(v_kpi_all, v_kpi_year, "violation", is_accident=False)
+    a_kpi_html = build_kpi_html(a_kpi_all, a_kpi_year, "accident", is_accident=True)
 
     v_insights_html = build_insights_html(v_all_insights, v_year_insights, "violation")
     v_recs_html = build_recommendations_html(v_all_recommendations, v_year_recommendations, "violation")
@@ -1327,18 +1421,19 @@ footer a{color:var(--secondary);text-decoration:none}
 
 def main():
     print("=" * 60)
-    print("桃園市交通裁罰及傷亡資訊報告生成器 v5.2")
+    print("桃園市交通裁罰及傷亡資訊報告生成器 v5.3")
     print("=" * 60)
 
-    v_data = {"year_figs": {}, "all_figs": [], "year_maps": {}, "all_map": None, "years": [], "is_sample": False, "kpi": {}, "all_insights": [], "all_recommendations": [], "year_insights": {}, "year_recommendations": {}}
-    a_data = {"year_figs": {}, "all_figs": [], "year_maps": {}, "all_map": None, "years": [], "is_sample": False, "kpi": {}, "all_insights": [], "all_recommendations": [], "year_insights": {}, "year_recommendations": {}}
+    v_data = {"year_figs": {}, "all_figs": [], "year_maps": {}, "all_map": None, "years": [], "is_sample": False, "kpi_all": {}, "kpi_year": {}, "all_insights": [], "all_recommendations": [], "year_insights": {}, "year_recommendations": {}}
+    a_data = {"year_figs": {}, "all_figs": [], "year_maps": {}, "all_map": None, "years": [], "is_sample": False, "kpi_all": {}, "kpi_year": {}, "all_insights": [], "all_recommendations": [], "year_insights": {}, "year_recommendations": {}}
 
     try:
         va = analyze_violations()
         if va:
             v_data["years"] = va["years"]
             v_data["is_sample"] = va.get("is_sample", False)
-            v_data["kpi"] = va.get("kpi", {})
+            v_data["kpi_all"] = va.get("kpi_all", {})
+            v_data["kpi_year"] = va.get("kpi_year", {})
             v_data["all_insights"] = va.get("all_insights", [])
             v_data["all_recommendations"] = va.get("all_recommendations", [])
             v_data["year_insights"] = va.get("year_insights", {})
@@ -1358,7 +1453,8 @@ def main():
         if aa:
             a_data["years"] = aa["years"]
             a_data["is_sample"] = aa.get("is_sample", False)
-            a_data["kpi"] = aa.get("kpi", {})
+            a_data["kpi_all"] = aa.get("kpi_all", {})
+            a_data["kpi_year"] = aa.get("kpi_year", {})
             a_data["all_insights"] = aa.get("all_insights", [])
             a_data["all_recommendations"] = aa.get("all_recommendations", [])
             a_data["year_insights"] = aa.get("year_insights", {})
